@@ -20,10 +20,15 @@ jobs:
       - name: Install WiX
         shell: powershell
         run: choco install wixtoolset --no-progress -y
-      - name: Build installer
-        shell: cmd
+      - name: Build application
+        shell: powershell
         working-directory: source
-        run: build-windows-exe.bat
+        run: mvn clean package
+      - name: Build Windows installer
+        shell: powershell
+        working-directory: source
+        run: |
+          jpackage --type exe --name "Qimutang-Store-System" --app-version 2.0.0 --vendor "Qimutang" --description "Qimutang local store management system" --input target --main-jar qimutang.jar --dest dist --java-options "-Dfile.encoding=UTF-8" --win-shortcut --win-menu --win-dir-chooser --win-per-user-install
       - uses: actions/upload-artifact@v4
         with:
           name: Qimutang-Windows-Installer
