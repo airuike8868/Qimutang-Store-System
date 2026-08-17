@@ -10,7 +10,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Extract source
         shell: powershell
-        run: Expand-Archive -Path source.zip -DestinationPath source -Force
+        run: Expand-Archive -Path source-ui-2.1.1.zip -DestinationPath source -Force
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -25,10 +25,10 @@ jobs:
         shell: powershell
         working-directory: source
         run: |
-          jpackage --type app-image --name "Qimutang-Store-System" --app-version 2.0.0 --vendor "Qimutang" --description "Qimutang local store management system" --input target --main-jar qimutang.jar --dest portable --java-options "-Dfile.encoding=UTF-8"
-          Compress-Archive -Path "portable\Qimutang-Store-System" -DestinationPath "Qimutang-Store-System-2.0.0-Portable.zip" -Force
+          jpackage --type app-image --name "Qimutang-Store-System" --app-version 2.1.1 --vendor "Qimutang" --description "Qimutang local store management system" --input target --main-jar qimutang.jar --dest portable --java-options "-Dfile.encoding=UTF-8"
+          Compress-Archive -Path "portable\Qimutang-Store-System" -DestinationPath "Qimutang-Store-System-2.1.1-Portable.zip" -Force
       - uses: actions/upload-artifact@v4
         with:
-          name: Qimutang-Windows-Portable
-          path: source/Qimutang-Store-System-2.0.0-Portable.zip
+          name: Qimutang-Windows-Portable-2.1.1
+          path: source/Qimutang-Store-System-2.1.1-Portable.zip
           if-no-files-found: error
