@@ -25,7 +25,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-          cache: maven
 
       - name: Extract and locate Maven project
         shell: powershell
@@ -175,7 +174,6 @@ jobs:
             return $text
           }
 
-          # DbCompat.java
           $file = Get-ChildItem `
             -Path $env:PROJECT_DIR `
             -Filter DbCompat.java `
@@ -202,7 +200,6 @@ jobs:
             Write-Host "Patched DbCompat"
           }
 
-          # SqliteToMysqlMigrationService.java
           $file = Get-ChildItem `
             -Path $env:PROJECT_DIR `
             -Filter SqliteToMysqlMigrationService.java `
@@ -233,7 +230,6 @@ jobs:
             Write-Host "Patched migration service"
           }
 
-          # MySqlReadinessService.java
           $file = Get-ChildItem `
             -Path $env:PROJECT_DIR `
             -Filter MySqlReadinessService.java `
@@ -260,7 +256,6 @@ jobs:
             Write-Host "Patched readiness service"
           }
 
-          # MySqlLogicalBackup.java
           $file = Get-ChildItem `
             -Path $env:PROJECT_DIR `
             -Filter MySqlLogicalBackup.java `
@@ -332,13 +327,14 @@ jobs:
             $env:PROJECT_DIR `
             "target\qimutang.jar"
 
-          if (
-            $jar.FullName -ne $targetJar
-          ) {
+          $sourceFull = [System.IO.Path]::GetFullPath($jar.FullName)
+          $targetFull = [System.IO.Path]::GetFullPath($targetJar)
+
+          if ($sourceFull -ne $targetFull) {
 
             Copy-Item `
-              -LiteralPath $jar.FullName `
-              -Destination $targetJar `
+              -LiteralPath $sourceFull `
+              -Destination $targetFull `
               -Force
 
             Write-Host "JAR renamed to qimutang.jar"
@@ -348,7 +344,7 @@ jobs:
             Write-Host "qimutang.jar already correct"
           }
 
-          if (!(Test-Path $targetJar)) {
+          if (!(Test-Path $targetFull)) {
             throw "qimutang.jar missing"
           }
 
@@ -461,6 +457,14 @@ jobs:
             throw "MySQL ZIP missing"
           }
 
+          $mysqlSize = (Get-Item $mysqlZip).Length
+
+          Write-Host "MySQL ZIP size: $mysqlSize"
+
+          if ($mysqlSize -lt 200MB) {
+            throw "MySQL ZIP invalid or incomplete"
+          }
+
           $mysqlExtract = Join-Path `
             $env:RUNNER_TEMP `
             "mysql-extracted"
@@ -477,6 +481,9 @@ jobs:
           $mysqlRoot = Get-ChildItem `
             $mysqlExtract `
             -Directory |
+            Where-Object {
+              Test-Path (Join-Path $_.FullName "bin\mysqld.exe")
+            } |
             Select-Object -First 1
 
           if (!$mysqlRoot) {
@@ -542,8 +549,7 @@ jobs:
           Filename: "{app}\start-qimutang.cmd"; Description: "启动齐沐堂门店管理系统"; Flags: nowait postinstall skipifsilent
           "@
 
-          $utf8NoBom = `
-            New-Object System.Text.UTF8Encoding($false)
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
           [System.IO.File]::WriteAllText(
             $iss,
@@ -551,7 +557,7 @@ jobs:
             $utf8NoBom
           )
 
-          Write-Host "ISS:"
+          Write-Host "Generated installer script:"
           Get-Content $iss
 
           "ISS_FILE=$iss" |
