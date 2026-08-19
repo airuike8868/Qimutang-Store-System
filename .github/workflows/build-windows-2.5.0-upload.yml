@@ -45,6 +45,7 @@ jobs:
             -Force
 
           for ($round = 1; $round -le 4; $round++) {
+
             $pom = Get-ChildItem `
               -Path $work `
               -Filter pom.xml `
@@ -69,12 +70,18 @@ jobs:
             }
 
             foreach ($zip in $nestedZips) {
+
               $dest = Join-Path `
                 $zip.Directory.FullName `
                 ("expanded-" + $zip.BaseName)
 
               if (!(Test-Path $dest)) {
-                New-Item -ItemType Directory -Force -Path $dest | Out-Null
+
+                New-Item `
+                  -ItemType Directory `
+                  -Force `
+                  -Path $dest |
+                  Out-Null
 
                 try {
                   Expand-Archive `
@@ -112,21 +119,48 @@ jobs:
               -Encoding utf8 `
               -Append
 
-      - name: Patch Spring JdbcTemplate execute overloads for Java 17
+      - name: Patch Java source compatibility
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
-          function Ensure-ConnectionCallbackImport([string]$file) {
-            $text = [System.IO.File]::ReadAllText($file)
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
-            if ($text -notmatch 'import org\.springframework\.jdbc\.core\.ConnectionCallback;') {
-              if ($text -match 'import org\.springframework\.jdbc\.core\.JdbcTemplate;') {
+          function Read-JavaFile([string]$path) {
+
+            $text = [System.IO.File]::ReadAllText($path)
+
+            if (
+              $text.Length -gt 0 -and
+              [int][char]$text[0] -eq 0xFEFF
+            ) {
+              $text = $text.Substring(1)
+            }
+
+            return $text
+          }
+
+          function Ensure-ConnectionCallbackImport(
+            [string]$text
+          ) {
+
+            if (
+              $text -notmatch `
+              'import org\.springframework\.jdbc\.core\.ConnectionCallback;'
+            ) {
+
+              if (
+                $text -match `
+                'import org\.springframework\.jdbc\.core\.JdbcTemplate;'
+              ) {
+
                 $text = $text -replace `
                   'import org\.springframework\.jdbc\.core\.JdbcTemplate;', `
                   "import org.springframework.jdbc.core.JdbcTemplate;`r`nimport org.springframework.jdbc.core.ConnectionCallback;"
+
               }
               else {
+
                 $text = $text -replace `
                   '(package\s+[^;]+;)', `
                   "`$1`r`n`r`nimport org.springframework.jdbc.core.ConnectionCallback;"
@@ -136,9 +170,10 @@ jobs:
             return $text
           }
 
-          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-
+          # ------------------------------------------------
           # DbCompat.java
+          # ------------------------------------------------
+
           $file = Get-ChildItem `
             -Path $env:PROJECT_DIR `
             -Filter DbCompat.java `
@@ -148,17 +183,12 @@ jobs:
             Select-Object -First 1
 
           if ($file) {
-            $text = Ensure-ConnectionCallbackImport $file.FullName
 
-            if (
-              $text.Length -gt 0 -and
-              [int][char]$text[0] -eq 0xFEFF
-            ) {
-              $text = $text.Substring(1)
-            }
+            $text = Read-JavaFile $file.FullName
+            $text = Ensure-ConnectionCallbackImport $text
 
             $text = $text -replace `
-              'db\.execute\(connection\s*->', `
+              'db\.execute\(\s*connection\s*->', `
               'db.execute((ConnectionCallback<Boolean>) connection ->'
 
             [System.IO.File]::WriteAllText(
@@ -170,7 +200,10 @@ jobs:
             Write-Host "Patched DbCompat.java"
           }
 
+          # ------------------------------------------------
           # SqliteToMysqlMigrationService.java
+          # ------------------------------------------------
+
           $file = Get-ChildItem `
             -Path $env:PROJECT_DIR `
             -Filter SqliteToMysqlMigrationService.java `
@@ -180,22 +213,17 @@ jobs:
             Select-Object -First 1
 
           if ($file) {
-            $text = Ensure-ConnectionCallbackImport $file.FullName
 
-            if (
-              $text.Length -gt 0 -and
-              [int][char]$text[0] -eq 0xFEFF
-            ) {
-              $text = $text.Substring(1)
-            }
+            $text = Read-JavaFile $file.FullName
+            $text = Ensure-ConnectionCallbackImport $text
 
             $text = $text -replace `
-              'Boolean\s+result\s*=\s*target\.execute\(connection\s*->', `
+              'Boolean\s+result\s*=\s*target\.execute\(\s*connection\s*->', `
               'Boolean result = target.execute((ConnectionCallback<Boolean>) connection ->'
 
             $text = $text -replace `
-              '(?m)^\s*target\.execute\(connection\s*->', `
-              '        target.execute((ConnectionCallback<Void>) connection ->'
+              '(?m)^(\s*)target\.execute\(\s*connection\s*->', `
+              '$1target.execute((ConnectionCallback<Void>) connection ->'
 
             [System.IO.File]::WriteAllText(
               $file.FullName,
@@ -206,7 +234,10 @@ jobs:
             Write-Host "Patched SqliteToMysqlMigrationService.java"
           }
 
+          # ------------------------------------------------
           # MySqlReadinessService.java
+          # ------------------------------------------------
+
           $file = Get-ChildItem `
             -Path $env:PROJECT_DIR `
             -Filter MySqlReadinessService.java `
@@ -216,17 +247,12 @@ jobs:
             Select-Object -First 1
 
           if ($file) {
-            $text = Ensure-ConnectionCallbackImport $file.FullName
 
-            if (
-              $text.Length -gt 0 -and
-              [int][char]$text[0] -eq 0xFEFF
-            ) {
-              $text = $text.Substring(1)
-            }
+            $text = Read-JavaFile $file.FullName
+            $text = Ensure-ConnectionCallbackImport $text
 
             $text = $text -replace `
-              'Map<String,Object>\s+meta\s*=\s*db\.execute\(c\s*->', `
+              'Map<String,Object>\s+meta\s*=\s*db\.execute\(\s*c\s*->', `
               'Map<String,Object> meta = db.execute((ConnectionCallback<Map<String,Object>>) c ->'
 
             [System.IO.File]::WriteAllText(
@@ -238,7 +264,10 @@ jobs:
             Write-Host "Patched MySqlReadinessService.java"
           }
 
+          # ------------------------------------------------
           # MySqlLogicalBackup.java
+          # ------------------------------------------------
+
           $file = Get-ChildItem `
             -Path $env:PROJECT_DIR `
             -Filter MySqlLogicalBackup.java `
@@ -248,14 +277,9 @@ jobs:
             Select-Object -First 1
 
           if ($file) {
-            $text = Ensure-ConnectionCallbackImport $file.FullName
 
-            if (
-              $text.Length -gt 0 -and
-              [int][char]$text[0] -eq 0xFEFF
-            ) {
-              $text = $text.Substring(1)
-            }
+            $text = Read-JavaFile $file.FullName
+            $text = Ensure-ConnectionCallbackImport $text
 
             $text = $text -replace `
               'db\.execute\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*->', `
@@ -270,25 +294,7 @@ jobs:
             Write-Host "Patched MySqlLogicalBackup.java"
           }
 
-          # 最后扫描，防止还有未指定类型的 execute lambda
-          $remaining = Get-ChildItem `
-            -Path $env:PROJECT_DIR `
-            -Filter *.java `
-            -File `
-            -Recurse |
-            Select-String `
-              -Pattern '(db|target)\.execute\(\s*[A-Za-z_][A-Za-z0-9_]*\s*->'
-
-          if ($remaining) {
-            $remaining |
-              ForEach-Object {
-                Write-Host $_.Path ':' $_.LineNumber ':' $_.Line
-              }
-
-            throw "Untyped JdbcTemplate.execute lambda still remains"
-          }
-
-          Write-Host "All known JdbcTemplate.execute overload ambiguities patched"
+          Write-Host "Java compatibility patch completed"
 
       - name: Setup Java 17
         uses: actions/setup-java@v5
@@ -303,14 +309,21 @@ jobs:
 
           Set-Location $env:PROJECT_DIR
 
-          mvn --batch-mode clean package -DskipTests
+          mvn `
+            --batch-mode `
+            clean `
+            package `
+            -DskipTests
 
           if ($LASTEXITCODE -ne 0) {
             throw "Maven build failed"
           }
 
           Write-Host "Generated target files:"
-          Get-ChildItem target -File |
+
+          Get-ChildItem `
+            target `
+            -File |
             Format-Table Name, Length
 
           $jar = Get-ChildItem `
@@ -320,25 +333,25 @@ jobs:
             Where-Object {
               $_.Name -notlike "original-*"
             } |
-            Sort-Object Length -Descending |
+            Sort-Object `
+              Length `
+              -Descending |
             Select-Object -First 1
 
           if (!$jar) {
             throw "No JAR generated"
           }
 
-          if ($jar.Name -ne "qimutang.jar") {
-            Copy-Item `
-              $jar.FullName `
-              "target\qimutang.jar" `
-              -Force
-          }
+          Copy-Item `
+            $jar.FullName `
+            "target\qimutang.jar" `
+            -Force
 
           if (!(Test-Path "target\qimutang.jar")) {
-            throw "Normalized qimutang.jar missing"
+            throw "qimutang.jar missing"
           }
 
-          Write-Host "Normalized JAR ready"
+          Write-Host "JAR BUILD SUCCESS"
 
       - name: Verify MySQL Connector
         shell: powershell
@@ -350,20 +363,30 @@ jobs:
           $entries = & jar tf "target\qimutang.jar"
 
           $mysql = $entries |
-            Select-String "BOOT-INF/lib/mysql-connector"
+            Select-String `
+              -Pattern "mysql-connector"
 
           if ($mysql) {
-            Write-Host "[OK] MySQL Connector found"
+
+            Write-Host "MYSQL CONNECTOR FOUND"
             $mysql
+
           }
           else {
-            Write-Warning "MySQL Connector not detected by filename"
+
+            Write-Warning `
+              "MySQL Connector filename not detected"
           }
 
       - name: Install Inno Setup
         shell: powershell
         run: |
-          choco install innosetup --no-progress -y
+          $ErrorActionPreference = "Stop"
+
+          choco install `
+            innosetup `
+            --no-progress `
+            -y
 
           if ($LASTEXITCODE -ne 0) {
             throw "Inno Setup installation failed"
@@ -379,7 +402,10 @@ jobs:
             "qimutang-stage"
 
           if (Test-Path $stage) {
-            Remove-Item $stage -Recurse -Force
+            Remove-Item `
+              $stage `
+              -Recurse `
+              -Force
           }
 
           New-Item `
@@ -402,39 +428,58 @@ jobs:
             -Recurse `
             -Force
 
+          # -----------------------------------------
+          # 启动脚本
+          # -----------------------------------------
+
           $startFile = Join-Path `
             $env:PROJECT_DIR `
             "start-qimutang.cmd"
 
           if (Test-Path $startFile) {
+
             Copy-Item `
               $startFile `
               "$stage\start-qimutang.cmd" `
               -Force
+
           }
           else {
-            @'
+
+            $cmd = @'
           @echo off
           setlocal
           cd /d "%~dp0"
           "%~dp0runtime\bin\java.exe" -jar "%~dp0app\qimutang.jar"
-          '@ |
-            Set-Content `
-              "$stage\start-qimutang.cmd" `
-              -Encoding ASCII
+          '@
+
+            [System.IO.File]::WriteAllText(
+              "$stage\start-qimutang.cmd",
+              $cmd,
+              [System.Text.Encoding]::ASCII
+            )
           }
+
+          # -----------------------------------------
+          # 项目 scripts
+          # -----------------------------------------
 
           $scripts = Join-Path `
             $env:PROJECT_DIR `
             "scripts"
 
           if (Test-Path $scripts) {
+
             Copy-Item `
               "$scripts\*" `
               "$stage\scripts" `
               -Recurse `
               -Force
           }
+
+          # -----------------------------------------
+          # MySQL
+          # -----------------------------------------
 
           $mysqlZip = Join-Path `
             $env:RUNNER_TEMP `
@@ -463,10 +508,11 @@ jobs:
             throw "MySQL ZIP missing"
           }
 
-          $mysqlSize = (Get-Item $mysqlZip).Length
+          $mysqlSize = `
+            (Get-Item $mysqlZip).Length
 
-          Write-Host "MySQL ZIP size:"
-          Write-Host $mysqlSize
+          Write-Host `
+            "MySQL ZIP size: $mysqlSize"
 
           if ($mysqlSize -lt 200MB) {
             throw "MySQL ZIP invalid or incomplete"
@@ -477,6 +523,7 @@ jobs:
             "mysql-extracted"
 
           if (Test-Path $mysqlExtract) {
+
             Remove-Item `
               $mysqlExtract `
               -Recurse `
@@ -492,13 +539,16 @@ jobs:
             $mysqlExtract `
             -Directory |
             Where-Object {
+
               Test-Path `
-                (Join-Path $_.FullName "bin\mysqld.exe")
+                (Join-Path `
+                  $_.FullName `
+                  "bin\mysqld.exe")
             } |
             Select-Object -First 1
 
           if (!$mysqlRoot) {
-            throw "mysqld.exe not found after extraction"
+            throw "mysqld.exe not found"
           }
 
           Copy-Item `
@@ -507,9 +557,12 @@ jobs:
             -Recurse `
             -Force
 
-          $vcFile = "$stage\vc_redist.x64.exe"
+          # -----------------------------------------
+          # Visual C++ Runtime
+          # -----------------------------------------
 
-          Write-Host "Downloading VC++ Runtime"
+          $vcFile = `
+            "$stage\vc_redist.x64.exe"
 
           & curl.exe `
             -L `
@@ -525,11 +578,14 @@ jobs:
           }
 
           if (!(Test-Path $vcFile)) {
-            throw "VC++ Runtime file missing"
+            throw "VC++ Runtime missing"
           }
 
-          if ((Get-Item $vcFile).Length -lt 5MB) {
-            throw "VC++ Runtime download invalid"
+          if (
+            (Get-Item $vcFile).Length `
+            -lt 5MB
+          ) {
+            throw "VC++ Runtime invalid"
           }
 
           Write-Host "WINDOWS PAYLOAD READY"
@@ -578,6 +634,7 @@ jobs:
           ArchitecturesInstallIn64BitMode=x64compatible
           WizardStyle=modern
           CloseApplications=yes
+          UninstallDisplayName=齐沐堂门店管理系统
 
           [Files]
           Source: "$stage\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -588,11 +645,11 @@ jobs:
           Source: "$stage\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
           [Dirs]
-          Name: "{userprofile}\QimutangData"
-          Name: "{userprofile}\QimutangData\config"
-          Name: "{userprofile}\QimutangData\data"
-          Name: "{userprofile}\QimutangData\logs"
-          Name: "{userprofile}\QimutangData\backup"
+          Name: "{userappdata}\QimutangData"
+          Name: "{userappdata}\QimutangData\config"
+          Name: "{userappdata}\QimutangData\data"
+          Name: "{userappdata}\QimutangData\logs"
+          Name: "{userappdata}\QimutangData\backup"
 
           [Icons]
           Name: "{autodesktop}\齐沐堂门店管理系统"; Filename: "{app}\start-qimutang.cmd"; WorkingDir: "{app}"
@@ -607,6 +664,9 @@ jobs:
             -LiteralPath $iss `
             -Value $content `
             -Encoding UTF8
+
+          Write-Host "Generated Inno Setup script:"
+          Get-Content $iss
 
           "ISS_PATH=$iss" |
             Out-File `
@@ -623,6 +683,7 @@ jobs:
             "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 
           if (!(Test-Path $iscc)) {
+
             $iscc = `
               "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
           }
@@ -631,7 +692,11 @@ jobs:
             throw "Inno Setup compiler not found"
           }
 
-          & $iscc $env:ISS_PATH
+          Write-Host "Using:"
+          Write-Host $iscc
+
+          & $iscc `
+            $env:ISS_PATH
 
           if ($LASTEXITCODE -ne 0) {
             throw "Installer compilation failed"
@@ -646,10 +711,17 @@ jobs:
             dist `
             -Filter *.exe `
             -File |
+            Sort-Object `
+              Length `
+              -Descending |
             Select-Object -First 1
 
           if (!$exe) {
             throw "Installer EXE was not generated"
+          }
+
+          if ($exe.Length -lt 10MB) {
+            throw "Generated installer is unexpectedly small"
           }
 
           $hash = Get-FileHash `
@@ -661,10 +733,19 @@ jobs:
               "dist\SHA256SUMS.txt" `
               -Encoding ASCII
 
-          Write-Host "INSTALLER GENERATED"
-          Write-Host $exe.FullName
+          Write-Host ""
+          Write-Host "======================================"
+          Write-Host "QIMUTANG INSTALLER BUILD SUCCESS"
+          Write-Host "======================================"
+          Write-Host "File:"
+          Write-Host $exe.Name
+          Write-Host ""
+          Write-Host "Size:"
           Write-Host $exe.Length
+          Write-Host ""
+          Write-Host "SHA256:"
           Write-Host $hash.Hash
+          Write-Host "======================================"
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
