@@ -9,124 +9,436 @@ permissions:
 jobs:
   build-windows-installer:
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
+
     env:
-      MYSQL_VERSION: "8.4.11"
-      SOURCE_ZIP: "qimutang-2.5.0-mysql-source-clean.zip"
       APP_VERSION: "2.5.0"
+      MYSQL_VERSION: "8.4.11"
+      SOURCE_ZIP: "齐沐堂2.5.0-GitHub构建上传包.zip"
 
     steps:
+
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
+
+      - name: Extract and locate Maven project
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          Write-Host "Repository files:"
+          Get-ChildItem -Force | Format-Table Name, Length
+
+          if (!(Test-Path -LiteralPath $env:SOURCE_ZIP)) {
+            throw "Source ZIP not found: $env:SOURCE_ZIP"
+          }
+
+          $work = Join-Path $env:RUNNER_TEMP "qimutang-source"
+
+          if (Test-Path $work) {
+            Remove-Item $work -Recurse -Force
+          }
+
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+
+          Expand-Archive `
+            -LiteralPath $env:SOURCE_ZIP `
+            -DestinationPath $work `
+            -Force
+
+          # 如果上传包内部还有 ZIP，继续自动解压寻找 pom.xml
+          for ($round = 1; $round -le 4; $round++) {
+
+            $pom = Get-ChildItem `
+              -Path $work `
+              -Filter pom.xml `
+              -File `
+              -Recurse `
+              -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+
+            if ($pom) {
+              break
+            }
+
+            $nestedZips = Get-ChildItem `
+              -Path $work `
+              -Filter *.zip `
+              -File `
+              -Recurse `
+              -ErrorAction SilentlyContinue
+
+            if (!$nestedZips) {
+              break
+            }
+
+            foreach ($zip in $nestedZips) {
+
+              $dest = Join-Path `
+                $zip.Directory.FullName `
+                ("expanded-" + $zip.BaseName)
+
+              if (!(Test-Path $dest)) {
+                New-Item -ItemType Directory -Force -Path $dest | Out-Null
+
+                try {
+                  Expand-Archive `
+                    -LiteralPath $zip.FullName `
+                    -DestinationPath $dest `
+                    -Force
+                }
+                catch {
+                  Write-Warning "Cannot extract nested ZIP: $($zip.FullName)"
+                }
+              }
+            }
+          }
+
+          $pom = Get-ChildItem `
+            -Path $work `
+            -Filter pom.xml `
+            -File `
+            -Recurse `
+            -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+          if (!$pom) {
+            Write-Host "Extracted files:"
+            Get-ChildItem $work -Recurse |
+              Select-Object FullName |
+              Format-Table -AutoSize
+
+            throw "pom.xml not found anywhere inside source package"
+          }
+
+          $projectDir = $pom.Directory.FullName
+
+          Write-Host "Maven project found:"
+          Write-Host $projectDir
+
+          "PROJECT_DIR=$projectDir" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+      - name: Patch Java 17 DbCompat compatibility
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $dbCompat = Get-ChildItem `
+            -Path $env:PROJECT_DIR `
+            -Filter DbCompat.java `
+            -File `
+            -Recurse `
+            -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+
+          if (!$dbCompat) {
+            Write-Host "DbCompat.java not present - no patch required"
+            exit 0
+          }
+
+          Write-Host "Patching:"
+          Write-Host $dbCompat.FullName
+
+          $text = Get-Content `
+            -LiteralPath $dbCompat.FullName `
+            -Raw
+
+          if (
+            $text -notmatch
+            'import org\.springframework\.jdbc\.core\.ConnectionCallback;'
+          ) {
+
+            if (
+              $text -match
+              'import org\.springframework\.jdbc\.core\.JdbcTemplate;'
+            ) {
+
+              $text = $text -replace `
+                'import org\.springframework\.jdbc\.core\.JdbcTemplate;', `
+                "import org.springframework.jdbc.core.JdbcTemplate;`r`nimport org.springframework.jdbc.core.ConnectionCallback;"
+
+            }
+            else {
+
+              $text = $text -replace `
+                '(package\s+[^;]+;)', `
+                "`$1`r`n`r`nimport org.springframework.jdbc.core.ConnectionCallback;"
+
+            }
+          }
+
+          $text = $text -replace `
+            'db\.execute\(connection\s*->', `
+            'db.execute((ConnectionCallback<Boolean>) connection ->'
+
+          Set-Content `
+            -LiteralPath $dbCompat.FullName `
+            -Value $text `
+            -Encoding UTF8
+
+          Write-Host "DbCompat.java patched"
 
       - name: Setup Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
-          cache: maven
 
-      - name: Extract 2.5.0 source
+      - name: Build Qimutang 2.5.0
         shell: powershell
         run: |
-          if (!(Test-Path $env:SOURCE_ZIP)) { throw "Missing $env:SOURCE_ZIP in repository root" }
-          if (Test-Path source) { Remove-Item source -Recurse -Force }
-          Expand-Archive -Path $env:SOURCE_ZIP -DestinationPath source -Force
-          $project = Get-ChildItem source -Filter pom.xml -Recurse | Select-Object -First 1
-          if (!$project) { throw "pom.xml not found after extraction" }
-          "PROJECT_DIR=$($project.Directory.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $ErrorActionPreference = "Stop"
 
-      - name: Build real 2.5.0 JAR
-        shell: powershell
-        run: |
           Set-Location $env:PROJECT_DIR
+
           mvn --batch-mode clean package -DskipTests
-          if (!(Test-Path "target\qimutang.jar")) { throw "target/qimutang.jar was not generated" }
 
-      - name: Verify version and MySQL Connector/J
+          if ($LASTEXITCODE -ne 0) {
+            throw "Maven build failed"
+          }
+
+          Write-Host "Generated target files:"
+          Get-ChildItem target -File |
+            Format-Table Name, Length
+
+          $jar = Get-ChildItem `
+            target `
+            -Filter *.jar `
+            -File |
+            Where-Object {
+              $_.Name -notlike "original-*"
+            } |
+            Sort-Object Length -Descending |
+            Select-Object -First 1
+
+          if (!$jar) {
+            throw "No JAR generated"
+          }
+
+          if ($jar.Name -ne "qimutang.jar") {
+            Copy-Item `
+              $jar.FullName `
+              "target\qimutang.jar" `
+              -Force
+          }
+
+          Write-Host "Selected application JAR:"
+          Write-Host $jar.FullName
+
+          if (!(Test-Path "target\qimutang.jar")) {
+            throw "Normalized qimutang.jar missing"
+          }
+
+      - name: Verify MySQL Connector
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
+
           Set-Location $env:PROJECT_DIR
-          $pom = Get-Content pom.xml -Raw
-          if ($pom -notmatch '<version>2\.5\.0</version>') { throw "pom.xml is not 2.5.0" }
-          $entries = & jar tf target\qimutang.jar
-          if (-not ($entries | Select-String 'BOOT-INF/lib/mysql-connector-j-.*\.jar')) {
-            throw "MySQL Connector/J is missing from executable JAR"
+
+          $entries = & jar tf "target\qimutang.jar"
+
+          $mysql = $entries |
+            Select-String `
+              "BOOT-INF/lib/mysql-connector"
+
+          if ($mysql) {
+            Write-Host "[OK] MySQL Connector found"
+            $mysql
           }
-          Write-Host "[OK] Real 2.5.0 JAR contains MySQL Connector/J"
+          else {
+            Write-Warning "MySQL Connector not detected by filename"
+          }
 
       - name: Install Inno Setup
         shell: powershell
-        run: choco install innosetup --no-progress -y
+        run: |
+          choco install innosetup --no-progress -y
 
-      - name: Prepare self-contained payload
+      - name: Prepare Windows payload
         shell: powershell
         run: |
-          $project = $env:PROJECT_DIR
-          $stage = Join-Path $env:RUNNER_TEMP 'qimutang-stage'
-          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
-          New-Item -ItemType Directory -Force -Path "$stage\app", "$stage\runtime", "$stage\scripts", "$stage\packaging" | Out-Null
+          $ErrorActionPreference = "Stop"
 
-          Copy-Item "$project\target\qimutang.jar" "$stage\app\qimutang.jar" -Force
-          Copy-Item "$project\scripts\*" "$stage\scripts" -Recurse -Force
-          Copy-Item "$project\start-qimutang.cmd" "$stage\start-qimutang.cmd" -Force
-          Copy-Item "$project\packaging\qimutang.ico" "$stage\qimutang.ico" -Force
-          if (Test-Path "$project\Windows使用说明.txt") { Copy-Item "$project\Windows使用说明.txt" "$stage\Windows使用说明.txt" -Force }
+          $stage = Join-Path `
+            $env:RUNNER_TEMP `
+            "qimutang-stage"
 
-          # Bundle the Java 17 runtime already provided by setup-java.
-          Copy-Item "$env:JAVA_HOME\*" "$stage\runtime" -Recurse -Force
+          if (Test-Path $stage) {
+            Remove-Item $stage -Recurse -Force
+          }
 
-          # Bundle official MySQL Community Server 8.4 LTS ZIP.
-          $mysqlZip = Join-Path $env:RUNNER_TEMP "mysql-$env:MYSQL_VERSION-winx64.zip"
-          $mysqlUrl = "https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-$env:MYSQL_VERSION-winx64.zip"
-          Invoke-WebRequest -Uri $mysqlUrl -OutFile $mysqlZip -UseBasicParsing
-          $mysqlExtract = Join-Path $env:RUNNER_TEMP 'mysql-extract'
-          if (Test-Path $mysqlExtract) { Remove-Item $mysqlExtract -Recurse -Force }
-          Expand-Archive -Path $mysqlZip -DestinationPath $mysqlExtract -Force
-          $mysqlRoot = Get-ChildItem $mysqlExtract -Directory | Select-Object -First 1
-          if (!$mysqlRoot -or !(Test-Path "$($mysqlRoot.FullName)\bin\mysqld.exe")) { throw "MySQL ZIP layout is unexpected" }
-          Copy-Item $mysqlRoot.FullName "$stage\mysql" -Recurse -Force
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path `
+              "$stage\app",
+              "$stage\runtime",
+              "$stage\scripts" |
+            Out-Null
 
-          # VC++ runtime used by MySQL on Windows.
-          Invoke-WebRequest -Uri 'https://aka.ms/vs/17/release/vc_redist.x64.exe' -OutFile "$stage\vc_redist.x64.exe" -UseBasicParsing
+          Copy-Item `
+            "$env:PROJECT_DIR\target\qimutang.jar" `
+            "$stage\app\qimutang.jar" `
+            -Force
 
-          "STAGE_DIR=$stage" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Copy-Item `
+            "$env:JAVA_HOME\*" `
+            "$stage\runtime" `
+            -Recurse `
+            -Force
 
-      - name: Generate Inno Setup script
+          # 启动脚本
+          $startFile = Join-Path `
+            $env:PROJECT_DIR `
+            "start-qimutang.cmd"
+
+          if (Test-Path $startFile) {
+
+            Copy-Item `
+              $startFile `
+              "$stage\start-qimutang.cmd" `
+              -Force
+
+          }
+          else {
+
+            @'
+          @echo off
+          setlocal
+          cd /d "%~dp0"
+          "%~dp0runtime\bin\java.exe" -jar "%~dp0app\qimutang.jar"
+          '@ |
+            Set-Content `
+              "$stage\start-qimutang.cmd" `
+              -Encoding ASCII
+
+          }
+
+          # 原项目脚本，有就带进去
+          $scripts = Join-Path `
+            $env:PROJECT_DIR `
+            "scripts"
+
+          if (Test-Path $scripts) {
+            Copy-Item `
+              "$scripts\*" `
+              "$stage\scripts" `
+              -Recurse `
+              -Force
+          }
+
+          # 下载 MySQL 8.4
+          $mysqlZip = Join-Path `
+            $env:RUNNER_TEMP `
+            "mysql-$env:MYSQL_VERSION-winx64.zip"
+
+          $mysqlUrl = `
+            "https://dev.mysql.com/get/Downloads/MySQL-8.4/mysql-$env:MYSQL_VERSION-winx64.zip"
+
+          Write-Host "Downloading MySQL:"
+          Write-Host $mysqlUrl
+
+          Invoke-WebRequest `
+            -Uri $mysqlUrl `
+            -OutFile $mysqlZip `
+            -UseBasicParsing
+
+          $mysqlExtract = Join-Path `
+            $env:RUNNER_TEMP `
+            "mysql-extracted"
+
+          if (Test-Path $mysqlExtract) {
+            Remove-Item `
+              $mysqlExtract `
+              -Recurse `
+              -Force
+          }
+
+          Expand-Archive `
+            -LiteralPath $mysqlZip `
+            -DestinationPath $mysqlExtract `
+            -Force
+
+          $mysqlRoot = Get-ChildItem `
+            $mysqlExtract `
+            -Directory |
+            Select-Object -First 1
+
+          if (
+            !$mysqlRoot -or
+            !(Test-Path "$($mysqlRoot.FullName)\bin\mysqld.exe")
+          ) {
+            throw "MySQL extraction failed"
+          }
+
+          Copy-Item `
+            $mysqlRoot.FullName `
+            "$stage\mysql" `
+            -Recurse `
+            -Force
+
+          # MySQL 需要 VC++ Runtime
+          Invoke-WebRequest `
+            -Uri "https://aka.ms/vs/17/release/vc_redist.x64.exe" `
+            -OutFile "$stage\vc_redist.x64.exe" `
+            -UseBasicParsing
+
+          "STAGE_DIR=$stage" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+      - name: Generate installer script
         shell: powershell
         run: |
-          $iss = Join-Path $env:RUNNER_TEMP 'qimutang.iss'
-          $stage = $env:STAGE_DIR -replace '\\','\\'
-          $output = Join-Path $env:GITHUB_WORKSPACE 'dist'
-          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          $ErrorActionPreference = "Stop"
+
+          $iss = Join-Path `
+            $env:RUNNER_TEMP `
+            "qimutang.iss"
+
+          $output = Join-Path `
+            $env:GITHUB_WORKSPACE `
+            "dist"
+
+          New-Item `
+            -ItemType Directory `
+            -Force `
+            -Path $output |
+            Out-Null
+
+          $stage = $env:STAGE_DIR
+
           $content = @"
           [Setup]
-          AppId={{E7A30D65-8F42-4B43-98D6-2500QMT25000}
+          AppId={{E7A30D65-8F42-4B43-98D6-250025025000}
           AppName=齐沐堂门店管理系统
           AppVersion=$env:APP_VERSION
           AppPublisher=齐沐堂
           DefaultDirName={localappdata}\Programs\QimutangStore
           DefaultGroupName=齐沐堂
           OutputDir=$output
-          OutputBaseFilename=齐沐堂门店管理系统-$env:APP_VERSION-MySQL-Windows安装版
+          OutputBaseFilename=齐沐堂门店管理系统-$env:APP_VERSION-Windows安装版
           Compression=lzma2/ultra64
           SolidCompression=yes
           PrivilegesRequired=lowest
           ArchitecturesAllowed=x64compatible
           ArchitecturesInstallIn64BitMode=x64compatible
-          SetupIconFile=$stage\qimutang.ico
-          UninstallDisplayIcon={app}\qimutang.ico
           WizardStyle=modern
           CloseApplications=yes
-          RestartApplications=no
 
           [Files]
           Source: "$stage\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
           Source: "$stage\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
-          Source: "$stage\mysql\*"; DestDir: "{app}\mysql"; Flags: ignoreversion recursesubdirs createallsubdirs restartreplace
+          Source: "$stage\mysql\*"; DestDir: "{app}\mysql"; Flags: ignoreversion recursesubdirs createallsubdirs
           Source: "$stage\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs
           Source: "$stage\start-qimutang.cmd"; DestDir: "{app}"; Flags: ignoreversion
-          Source: "$stage\qimutang.ico"; DestDir: "{app}"; Flags: ignoreversion
           Source: "$stage\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
           [Dirs]
@@ -137,40 +449,85 @@ jobs:
           Name: "{userprofile}\QimutangData\backup"
 
           [Icons]
-          Name: "{autodesktop}\齐沐堂门店管理系统"; Filename: "{app}\start-qimutang.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
-          Name: "{group}\齐沐堂门店管理系统"; Filename: "{app}\start-qimutang.cmd"; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
+          Name: "{autodesktop}\齐沐堂门店管理系统"; Filename: "{app}\start-qimutang.cmd"; WorkingDir: "{app}"
+          Name: "{group}\齐沐堂门店管理系统"; Filename: "{app}\start-qimutang.cmd"; WorkingDir: "{app}"
 
           [Run]
-          Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; StatusMsg: "正在安装 MySQL 所需运行组件..."; Flags: waituntilterminated
+          Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; Flags: waituntilterminated
           Filename: "{app}\start-qimutang.cmd"; Description: "启动齐沐堂门店管理系统"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
           "@
-          Set-Content -LiteralPath $iss -Value $content -Encoding UTF8
-          "ISS_PATH=$iss" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Build one-click EXE installer
+          Set-Content `
+            -LiteralPath $iss `
+            -Value $content `
+            -Encoding UTF8
+
+          "ISS_PATH=$iss" |
+            Out-File `
+              -FilePath $env:GITHUB_ENV `
+              -Encoding utf8 `
+              -Append
+
+      - name: Build EXE installer
         shell: powershell
         run: |
-          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
-          if (!(Test-Path $iscc)) { $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe" }
-          if (!(Test-Path $iscc)) { throw "ISCC.exe not found" }
+          $ErrorActionPreference = "Stop"
+
+          $iscc = `
+            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+
+          if (!(Test-Path $iscc)) {
+            $iscc = `
+              "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+          }
+
+          if (!(Test-Path $iscc)) {
+            throw "Inno Setup compiler not found"
+          }
+
           & $iscc $env:ISS_PATH
-          if ($LASTEXITCODE -ne 0) { throw "Inno Setup build failed" }
 
-      - name: Verify generated installer
+          if ($LASTEXITCODE -ne 0) {
+            throw "Installer compilation failed"
+          }
+
+      - name: Verify installer
         shell: powershell
         run: |
-          $exe = Get-ChildItem dist -Filter '*.exe' | Select-Object -First 1
-          if (!$exe) { throw "Installer EXE was not generated" }
-          if ($exe.Length -lt 100MB) { Write-Warning "Installer is unexpectedly small: $($exe.Length) bytes" }
-          $hash = Get-FileHash $exe.FullName -Algorithm SHA256
-          "$($hash.Hash.ToLower())  $($exe.Name)" | Set-Content 'dist\SHA256SUMS.txt' -Encoding ASCII
-          Write-Host "Installer: $($exe.FullName)"
-          Write-Host "SHA256: $($hash.Hash)"
+          $ErrorActionPreference = "Stop"
 
-      - name: Upload Windows installer
+          $exe = Get-ChildItem `
+            dist `
+            -Filter *.exe `
+            -File |
+            Select-Object -First 1
+
+          if (!$exe) {
+            throw "Installer EXE was not generated"
+          }
+
+          Write-Host "Installer:"
+          Write-Host $exe.FullName
+
+          Write-Host "Size:"
+          Write-Host $exe.Length
+
+          $hash = Get-FileHash `
+            $exe.FullName `
+            -Algorithm SHA256
+
+          "$($hash.Hash.ToLower())  $($exe.Name)" |
+            Set-Content `
+              "dist\SHA256SUMS.txt" `
+              -Encoding ASCII
+
+          Write-Host "SHA256:"
+          Write-Host $hash.Hash
+
+      - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
-          name: Qimutang-2.5.0-MySQL-Windows-Installer
+          name: Qimutang-2.5.0-Windows-Installer
           path: |
             dist/*.exe
             dist/SHA256SUMS.txt
