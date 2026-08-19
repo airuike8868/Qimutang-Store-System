@@ -341,11 +341,16 @@ jobs:
           if (!$jar) {
             throw "No JAR generated"
           }
-
-          Copy-Item `
-            $jar.FullName `
-            "target\qimutang.jar" `
-            -Force
+if ($jar.Name -ne "qimutang.jar") {
+  Copy-Item `
+    $jar.FullName `
+    "target\qimutang.jar" `
+    -Force
+}
+else {
+  Write-Host "qimutang.jar already exists, no copy needed"
+}
+       
 
           if (!(Test-Path "target\qimutang.jar")) {
             throw "qimutang.jar missing"
