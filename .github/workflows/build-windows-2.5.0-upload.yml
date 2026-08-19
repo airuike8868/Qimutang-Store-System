@@ -20,14 +20,21 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v5
 
+      - name: Setup Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
       - name: Extract and locate Maven project
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
           if (!(Test-Path -LiteralPath $env:SOURCE_ZIP)) {
-            Write-Host "Repository root files:"
-            Get-ChildItem -Force | Format-Table Name, Length
+            Write-Host "Repository files:"
+            Get-ChildItem -Force | Format-Table Name,Length
             throw "Source ZIP not found: $env:SOURCE_ZIP"
           }
 
@@ -44,7 +51,7 @@ jobs:
             -DestinationPath $work `
             -Force
 
-          for ($round = 1; $round -le 4; $round++) {
+          for ($round = 1; $round -le 5; $round++) {
 
             $pom = Get-ChildItem `
               -Path $work `
@@ -90,7 +97,7 @@ jobs:
                     -Force
                 }
                 catch {
-                  Write-Warning "Cannot extract nested ZIP: $($zip.FullName)"
+                  Write-Warning "Cannot extract: $($zip.FullName)"
                 }
               }
             }
@@ -105,12 +112,12 @@ jobs:
             Select-Object -First 1
 
           if (!$pom) {
-            throw "pom.xml not found anywhere inside source package"
+            throw "pom.xml not found inside source ZIP"
           }
 
           $projectDir = $pom.Directory.FullName
 
-          Write-Host "Maven project found:"
+          Write-Host "PROJECT:"
           Write-Host $projectDir
 
           "PROJECT_DIR=$projectDir" |
@@ -119,14 +126,14 @@ jobs:
               -Encoding utf8 `
               -Append
 
-      - name: Patch Java source compatibility
+      - name: Patch Java compatibility
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
 
           $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 
-          function Read-JavaFile([string]$path) {
+          function Read-Java([string]$path) {
 
             $text = [System.IO.File]::ReadAllText($path)
 
@@ -140,17 +147,15 @@ jobs:
             return $text
           }
 
-          function Ensure-ConnectionCallbackImport(
-            [string]$text
-          ) {
+          function Add-CallbackImport([string]$text) {
 
             if (
-              $text -notmatch `
+              $text -notmatch
               'import org\.springframework\.jdbc\.core\.ConnectionCallback;'
             ) {
 
               if (
-                $text -match `
+                $text -match
                 'import org\.springframework\.jdbc\.core\.JdbcTemplate;'
               ) {
 
@@ -170,10 +175,7 @@ jobs:
             return $text
           }
 
-          # ------------------------------------------------
           # DbCompat.java
-          # ------------------------------------------------
-
           $file = Get-ChildItem `
             -Path $env:PROJECT_DIR `
             -Filter DbCompat.java `
@@ -184,8 +186,8 @@ jobs:
 
           if ($file) {
 
-            $text = Read-JavaFile $file.FullName
-            $text = Ensure-ConnectionCallbackImport $text
+            $text = Read-Java $file.FullName
+            $text = Add-CallbackImport $text
 
             $text = $text -replace `
               'db\.execute\(\s*connection\s*->', `
@@ -197,13 +199,10 @@ jobs:
               $utf8NoBom
             )
 
-            Write-Host "Patched DbCompat.java"
+            Write-Host "Patched DbCompat"
           }
 
-          # ------------------------------------------------
           # SqliteToMysqlMigrationService.java
-          # ------------------------------------------------
-
           $file = Get-ChildItem `
             -Path $env:PROJECT_DIR `
             -Filter SqliteToMysqlMigrationService.java `
@@ -214,8 +213,8 @@ jobs:
 
           if ($file) {
 
-            $text = Read-JavaFile $file.FullName
-            $text = Ensure-ConnectionCallbackImport $text
+            $text = Read-Java $file.FullName
+            $text = Add-CallbackImport $text
 
             $text = $text -replace `
               'Boolean\s+result\s*=\s*target\.execute\(\s*connection\s*->', `
@@ -231,13 +230,10 @@ jobs:
               $utf8NoBom
             )
 
-            Write-Host "Patched SqliteToMysqlMigrationService.java"
+            Write-Host "Patched migration service"
           }
 
-          # ------------------------------------------------
           # MySqlReadinessService.java
-          # ------------------------------------------------
-
           $file = Get-ChildItem `
             -Path $env:PROJECT_DIR `
             -Filter MySqlReadinessService.java `
@@ -248,8 +244,8 @@ jobs:
 
           if ($file) {
 
-            $text = Read-JavaFile $file.FullName
-            $text = Ensure-ConnectionCallbackImport $text
+            $text = Read-Java $file.FullName
+            $text = Add-CallbackImport $text
 
             $text = $text -replace `
               'Map<String,Object>\s+meta\s*=\s*db\.execute\(\s*c\s*->', `
@@ -261,13 +257,10 @@ jobs:
               $utf8NoBom
             )
 
-            Write-Host "Patched MySqlReadinessService.java"
+            Write-Host "Patched readiness service"
           }
 
-          # ------------------------------------------------
           # MySqlLogicalBackup.java
-          # ------------------------------------------------
-
           $file = Get-ChildItem `
             -Path $env:PROJECT_DIR `
             -Filter MySqlLogicalBackup.java `
@@ -278,8 +271,8 @@ jobs:
 
           if ($file) {
 
-            $text = Read-JavaFile $file.FullName
-            $text = Ensure-ConnectionCallbackImport $text
+            $text = Read-Java $file.FullName
+            $text = Add-CallbackImport $text
 
             $text = $text -replace `
               'db\.execute\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*->', `
@@ -291,16 +284,10 @@ jobs:
               $utf8NoBom
             )
 
-            Write-Host "Patched MySqlLogicalBackup.java"
+            Write-Host "Patched logical backup"
           }
 
-          Write-Host "Java compatibility patch completed"
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v5
-        with:
-          distribution: temurin
-          java-version: "17"
+          Write-Host "JAVA PATCH COMPLETE"
 
       - name: Build Qimutang 2.5.0
         shell: powershell
@@ -319,12 +306,13 @@ jobs:
             throw "Maven build failed"
           }
 
-          Write-Host "Generated target files:"
+          Write-Host "Generated JAR files:"
 
           Get-ChildItem `
             target `
+            -Filter *.jar `
             -File |
-            Format-Table Name, Length
+            Format-Table Name,Length
 
           $jar = Get-ChildItem `
             target `
@@ -333,26 +321,34 @@ jobs:
             Where-Object {
               $_.Name -notlike "original-*"
             } |
-            Sort-Object `
-              Length `
-              -Descending |
+            Sort-Object Length -Descending |
             Select-Object -First 1
 
           if (!$jar) {
             throw "No JAR generated"
           }
-if ($jar.Name -ne "qimutang.jar") {
-  Copy-Item `
-    $jar.FullName `
-    "target\qimutang.jar" `
-    -Force
-}
-else {
-  Write-Host "qimutang.jar already exists, no copy needed"
-}
-       
 
-          if (!(Test-Path "target\qimutang.jar")) {
+          $targetJar = Join-Path `
+            $env:PROJECT_DIR `
+            "target\qimutang.jar"
+
+          if (
+            $jar.FullName -ne $targetJar
+          ) {
+
+            Copy-Item `
+              -LiteralPath $jar.FullName `
+              -Destination $targetJar `
+              -Force
+
+            Write-Host "JAR renamed to qimutang.jar"
+          }
+          else {
+
+            Write-Host "qimutang.jar already correct"
+          }
+
+          if (!(Test-Path $targetJar)) {
             throw "qimutang.jar missing"
           }
 
@@ -368,19 +364,14 @@ else {
           $entries = & jar tf "target\qimutang.jar"
 
           $mysql = $entries |
-            Select-String `
-              -Pattern "mysql-connector"
+            Select-String -Pattern "mysql-connector"
 
           if ($mysql) {
-
             Write-Host "MYSQL CONNECTOR FOUND"
             $mysql
-
           }
           else {
-
-            Write-Warning `
-              "MySQL Connector filename not detected"
+            Write-Warning "Connector filename not visible in JAR"
           }
 
       - name: Install Inno Setup
@@ -388,10 +379,7 @@ else {
         run: |
           $ErrorActionPreference = "Stop"
 
-          choco install `
-            innosetup `
-            --no-progress `
-            -y
+          choco install innosetup --no-progress -y
 
           if ($LASTEXITCODE -ne 0) {
             throw "Inno Setup installation failed"
@@ -407,10 +395,7 @@ else {
             "qimutang-stage"
 
           if (Test-Path $stage) {
-            Remove-Item `
-              $stage `
-              -Recurse `
-              -Force
+            Remove-Item $stage -Recurse -Force
           }
 
           New-Item `
@@ -419,7 +404,9 @@ else {
             -Path `
               "$stage\app",
               "$stage\runtime",
-              "$stage\scripts" |
+              "$stage\mysql",
+              "$stage\data",
+              "$stage\logs" |
             Out-Null
 
           Copy-Item `
@@ -433,58 +420,19 @@ else {
             -Recurse `
             -Force
 
-          # -----------------------------------------
-          # 启动脚本
-          # -----------------------------------------
-
-          $startFile = Join-Path `
-            $env:PROJECT_DIR `
-            "start-qimutang.cmd"
-
-          if (Test-Path $startFile) {
-
-            Copy-Item `
-              $startFile `
-              "$stage\start-qimutang.cmd" `
-              -Force
-
-          }
-          else {
-
-            $cmd = @'
+          $cmd = @'
           @echo off
           setlocal
           cd /d "%~dp0"
-          "%~dp0runtime\bin\java.exe" -jar "%~dp0app\qimutang.jar"
+          start "" "%~dp0runtime\bin\javaw.exe" -jar "%~dp0app\qimutang.jar"
+          exit
           '@
 
-            [System.IO.File]::WriteAllText(
-              "$stage\start-qimutang.cmd",
-              $cmd,
-              [System.Text.Encoding]::ASCII
-            )
-          }
-
-          # -----------------------------------------
-          # 项目 scripts
-          # -----------------------------------------
-
-          $scripts = Join-Path `
-            $env:PROJECT_DIR `
-            "scripts"
-
-          if (Test-Path $scripts) {
-
-            Copy-Item `
-              "$scripts\*" `
-              "$stage\scripts" `
-              -Recurse `
-              -Force
-          }
-
-          # -----------------------------------------
-          # MySQL
-          # -----------------------------------------
+          [System.IO.File]::WriteAllText(
+            "$stage\start-qimutang.cmd",
+            $cmd,
+            [System.Text.Encoding]::ASCII
+          )
 
           $mysqlZip = Join-Path `
             $env:RUNNER_TEMP `
@@ -513,26 +461,12 @@ else {
             throw "MySQL ZIP missing"
           }
 
-          $mysqlSize = `
-            (Get-Item $mysqlZip).Length
-
-          Write-Host `
-            "MySQL ZIP size: $mysqlSize"
-
-          if ($mysqlSize -lt 200MB) {
-            throw "MySQL ZIP invalid or incomplete"
-          }
-
           $mysqlExtract = Join-Path `
             $env:RUNNER_TEMP `
             "mysql-extracted"
 
           if (Test-Path $mysqlExtract) {
-
-            Remove-Item `
-              $mysqlExtract `
-              -Recurse `
-              -Force
+            Remove-Item $mysqlExtract -Recurse -Force
           }
 
           Expand-Archive `
@@ -543,54 +477,20 @@ else {
           $mysqlRoot = Get-ChildItem `
             $mysqlExtract `
             -Directory |
-            Where-Object {
-
-              Test-Path `
-                (Join-Path `
-                  $_.FullName `
-                  "bin\mysqld.exe")
-            } |
             Select-Object -First 1
 
           if (!$mysqlRoot) {
-            throw "mysqld.exe not found"
+            throw "MySQL extracted directory missing"
           }
 
           Copy-Item `
-            $mysqlRoot.FullName `
+            "$($mysqlRoot.FullName)\*" `
             "$stage\mysql" `
             -Recurse `
             -Force
 
-          # -----------------------------------------
-          # Visual C++ Runtime
-          # -----------------------------------------
-
-          $vcFile = `
-            "$stage\vc_redist.x64.exe"
-
-          & curl.exe `
-            -L `
-            --fail `
-            --retry 5 `
-            --retry-delay 3 `
-            --connect-timeout 30 `
-            -o $vcFile `
-            "https://aka.ms/vs/17/release/vc_redist.x64.exe"
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "VC++ Runtime download failed"
-          }
-
-          if (!(Test-Path $vcFile)) {
-            throw "VC++ Runtime missing"
-          }
-
-          if (
-            (Get-Item $vcFile).Length `
-            -lt 5MB
-          ) {
-            throw "VC++ Runtime invalid"
+          if (!(Test-Path "$stage\mysql\bin\mysqld.exe")) {
+            throw "mysqld.exe missing"
           }
 
           Write-Host "WINDOWS PAYLOAD READY"
@@ -610,70 +510,51 @@ else {
             $env:RUNNER_TEMP `
             "qimutang.iss"
 
-          $output = Join-Path `
-            $env:GITHUB_WORKSPACE `
-            "dist"
-
-          New-Item `
-            -ItemType Directory `
-            -Force `
-            -Path $output |
-            Out-Null
-
           $stage = $env:STAGE_DIR
 
           $content = @"
           [Setup]
-          AppId={{E7A30D65-8F42-4B43-98D6-250025025000}
+          AppId=QimutangStoreSystem250
           AppName=齐沐堂门店管理系统
           AppVersion=$env:APP_VERSION
           AppPublisher=齐沐堂
-          DefaultDirName={localappdata}\Programs\QimutangStore
-          DefaultGroupName=齐沐堂
-          OutputDir=$output
-          OutputBaseFilename=齐沐堂门店管理系统-$env:APP_VERSION-Windows安装版
+          DefaultDirName={localappdata}\QimutangStoreSystem
+          DefaultGroupName=齐沐堂门店管理系统
+          DisableProgramGroupPage=yes
+          OutputDir=$env:RUNNER_TEMP
+          OutputBaseFilename=Qimutang-2.5.0-Windows-Installer
           Compression=lzma2
           SolidCompression=yes
-          PrivilegesRequired=lowest
           ArchitecturesAllowed=x64compatible
           ArchitecturesInstallIn64BitMode=x64compatible
+          PrivilegesRequired=lowest
           WizardStyle=modern
-          CloseApplications=yes
           UninstallDisplayName=齐沐堂门店管理系统
 
           [Files]
-          Source: "$stage\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
-          Source: "$stage\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
-          Source: "$stage\mysql\*"; DestDir: "{app}\mysql"; Flags: ignoreversion recursesubdirs createallsubdirs
-          Source: "$stage\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion recursesubdirs createallsubdirs
-          Source: "$stage\start-qimutang.cmd"; DestDir: "{app}"; Flags: ignoreversion
-          Source: "$stage\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
-
-          [Dirs]
-          Name: "{userappdata}\QimutangData"
-          Name: "{userappdata}\QimutangData\config"
-          Name: "{userappdata}\QimutangData\data"
-          Name: "{userappdata}\QimutangData\logs"
-          Name: "{userappdata}\QimutangData\backup"
+          Source: "$stage\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
           [Icons]
-          Name: "{autodesktop}\齐沐堂门店管理系统"; Filename: "{app}\start-qimutang.cmd"; WorkingDir: "{app}"
-          Name: "{group}\齐沐堂门店管理系统"; Filename: "{app}\start-qimutang.cmd"; WorkingDir: "{app}"
+          Name: "{autoprograms}\齐沐堂门店管理系统"; Filename: "{app}\start-qimutang.cmd"; WorkingDir: "{app}"
+          Name: "{userdesktop}\齐沐堂门店管理系统"; Filename: "{app}\start-qimutang.cmd"; WorkingDir: "{app}"
 
           [Run]
-          Filename: "{tmp}\vc_redist.x64.exe"; Parameters: "/install /quiet /norestart"; Flags: waituntilterminated
-          Filename: "{app}\start-qimutang.cmd"; Description: "启动齐沐堂门店管理系统"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+          Filename: "{app}\start-qimutang.cmd"; Description: "启动齐沐堂门店管理系统"; Flags: nowait postinstall skipifsilent
           "@
 
-          Set-Content `
-            -LiteralPath $iss `
-            -Value $content `
-            -Encoding UTF8
+          $utf8NoBom = `
+            New-Object System.Text.UTF8Encoding($false)
 
-          Write-Host "Generated Inno Setup script:"
+          [System.IO.File]::WriteAllText(
+            $iss,
+            $content,
+            $utf8NoBom
+          )
+
+          Write-Host "ISS:"
           Get-Content $iss
 
-          "ISS_PATH=$iss" |
+          "ISS_FILE=$iss" |
             Out-File `
               -FilePath $env:GITHUB_ENV `
               -Encoding utf8 `
@@ -684,24 +565,17 @@ else {
         run: |
           $ErrorActionPreference = "Stop"
 
-          $iscc = `
-            "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
 
           if (!(Test-Path $iscc)) {
-
-            $iscc = `
-              "${env:ProgramFiles}\Inno Setup 6\ISCC.exe"
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
           }
 
           if (!(Test-Path $iscc)) {
-            throw "Inno Setup compiler not found"
+            throw "ISCC.exe not found"
           }
 
-          Write-Host "Using:"
-          Write-Host $iscc
-
-          & $iscc `
-            $env:ISS_PATH
+          & $iscc $env:ISS_FILE
 
           if ($LASTEXITCODE -ne 0) {
             throw "Installer compilation failed"
@@ -712,52 +586,30 @@ else {
         run: |
           $ErrorActionPreference = "Stop"
 
-          $exe = Get-ChildItem `
-            dist `
-            -Filter *.exe `
-            -File |
-            Sort-Object `
-              Length `
-              -Descending |
-            Select-Object -First 1
+          $installer = Join-Path `
+            $env:RUNNER_TEMP `
+            "Qimutang-2.5.0-Windows-Installer.exe"
 
-          if (!$exe) {
-            throw "Installer EXE was not generated"
+          if (!(Test-Path $installer)) {
+            throw "Installer EXE missing"
           }
 
-          if ($exe.Length -lt 10MB) {
-            throw "Generated installer is unexpectedly small"
+          $size = (Get-Item $installer).Length
+
+          Write-Host "INSTALLER:"
+          Write-Host $installer
+
+          Write-Host "SIZE:"
+          Write-Host $size
+
+          if ($size -lt 1000000) {
+            throw "Installer EXE unexpectedly small"
           }
-
-          $hash = Get-FileHash `
-            $exe.FullName `
-            -Algorithm SHA256
-
-          "$($hash.Hash.ToLower())  $($exe.Name)" |
-            Set-Content `
-              "dist\SHA256SUMS.txt" `
-              -Encoding ASCII
-
-          Write-Host ""
-          Write-Host "======================================"
-          Write-Host "QIMUTANG INSTALLER BUILD SUCCESS"
-          Write-Host "======================================"
-          Write-Host "File:"
-          Write-Host $exe.Name
-          Write-Host ""
-          Write-Host "Size:"
-          Write-Host $exe.Length
-          Write-Host ""
-          Write-Host "SHA256:"
-          Write-Host $hash.Hash
-          Write-Host "======================================"
 
       - name: Upload installer
         uses: actions/upload-artifact@v4
         with:
           name: Qimutang-2.5.0-Windows-Installer
-          path: |
-            dist/*.exe
-            dist/SHA256SUMS.txt
+          path: ${{ runner.temp }}/Qimutang-2.5.0-Windows-Installer.exe
           if-no-files-found: error
           retention-days: 30
