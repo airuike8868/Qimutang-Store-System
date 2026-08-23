@@ -1,4 +1,4 @@
-name: Build Qimutang 3.1.0 Windows Desktop Client R5 Unicode
+name: Build Qimutang 3.1.0 Windows Desktop Client R6 Startup Fix
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
     env:
       APP_VERSION: "3.1.0"
       MYSQL_VERSION: "8.4.11"
-      SOURCE_ZIP: "qimutang-3.1.0-desktop-source-r3.zip"
+      SOURCE_ZIP: "qimutang-3.1.0-desktop-source-r4.zip"
 
     steps:
       - name: Checkout
@@ -225,7 +225,7 @@ jobs:
           DefaultGroupName=齐沐堂门店管理系统
           DisableProgramGroupPage=yes
           OutputDir=$output
-          OutputBaseFilename=Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-Unicode
+          OutputBaseFilename=Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-Unicode-R2
           SetupIconFile=$stage\qimutang.ico
           UninstallDisplayIcon={app}\qimutang.ico
           Compression=lzma2/max
@@ -258,12 +258,50 @@ jobs:
           Source: "$stage\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
           [Icons]
-          Name: "{autoprograms}\齐沐堂门店管理系统"; Filename: "{app}\client\QimutangDesktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
-          Name: "{userdesktop}\齐沐堂门店管理系统"; Filename: "{app}\client\QimutangDesktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
+          Name: "{autoprograms}\Qimutang 3.1.0"; Filename: "{app}\client\QimutangDesktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
+          Name: "{userdesktop}\Qimutang 3.1.0"; Filename: "{app}\client\QimutangDesktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
 
           [Run]
           Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "正在准备桌面运行环境..."; Flags: waituntilterminated skipifdoesntexist
           Filename: "{app}\client\QimutangDesktop.exe"; Description: "启动齐沐堂门店管理系统"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+
+          [Code]
+          procedure RemoveLegacyShortcuts(const Root: string);
+          var
+            FindRec: TFindRec;
+            ShortcutPath, Combined: string;
+            Shell, Shortcut: Variant;
+          begin
+            if not DirExists(Root) then Exit;
+            Shell := CreateOleObject('WScript.Shell');
+            if FindFirst(AddBackslash(Root) + '*.lnk', FindRec) then
+            begin
+              try
+                repeat
+                  ShortcutPath := AddBackslash(Root) + FindRec.Name;
+                  try
+                    Shortcut := Shell.CreateShortcut(ShortcutPath);
+                    Combined := Lowercase(Shortcut.TargetPath + ' ' + Shortcut.Arguments);
+                    if (Pos('qimutangdesktop.exe', Combined) > 0) or
+                       (Pos('qimutang.jar', Combined) > 0) then
+                      DeleteFile(ShortcutPath);
+                  except
+                  end;
+                until not FindNext(FindRec);
+              finally
+                FindClose(FindRec);
+              end;
+            end;
+          end;
+
+          procedure CurStepChanged(CurStep: TSetupStep);
+          begin
+            if CurStep = ssInstall then
+            begin
+              RemoveLegacyShortcuts(ExpandConstant('{userdesktop}'));
+              RemoveLegacyShortcuts(ExpandConstant('{userprograms}'));
+            end;
+          end;
           "@
 
           [System.IO.File]::WriteAllText($iss,$content,$utf8Bom)
@@ -375,7 +413,7 @@ jobs:
       - name: Upload 3.1.0 desktop installer
         uses: actions/upload-artifact@v4
         with:
-          name: Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-R4-Unicode
+          name: Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-R6-Startup-Fix
           path: |
             dist/*.exe
             dist/SHA256SUMS.txt
