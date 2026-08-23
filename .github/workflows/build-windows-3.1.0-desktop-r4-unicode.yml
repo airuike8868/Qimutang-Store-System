@@ -201,6 +201,17 @@ jobs:
           $output = Join-Path $env:GITHUB_WORKSPACE 'dist'
           New-Item -ItemType Directory -Force -Path $output | Out-Null
           $stage = $env:STAGE_DIR
+          $lang = Join-Path $env:RUNNER_TEMP 'ChineseSimplified.isl'
+          & curl.exe -L --fail --retry 5 --retry-delay 2 -o $lang 'https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl'
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path $lang) -or (Get-Item $lang).Length -lt 20000) {
+            throw "Official Simplified Chinese language file download failed"
+          }
+          $langText = [System.IO.File]::ReadAllText($lang,[System.Text.Encoding]::UTF8)
+          if (!$langText.Contains('LanguageID=$0804') -or !$langText.Contains('LanguageCodePage=936')) {
+            throw "Official Simplified Chinese language file is invalid"
+          }
+          $utf8Bom = New-Object System.Text.UTF8Encoding($true)
+          [System.IO.File]::WriteAllText($lang,$langText,$utf8Bom)
 
           $content = @"
           [Setup]
@@ -236,7 +247,7 @@ jobs:
           VersionInfoDescription=齐沐堂门店管理系统 3.1.0 MySQL商业版
 
           [Languages]
-          Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+          Name: "chinesesimp"; MessagesFile: "$lang"
 
           [Files]
           Source: "$stage\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
@@ -255,7 +266,6 @@ jobs:
           Filename: "{app}\client\QimutangDesktop.exe"; Description: "启动齐沐堂门店管理系统"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
           "@
 
-          $utf8Bom = New-Object System.Text.UTF8Encoding($true)
           [System.IO.File]::WriteAllText($iss,$content,$utf8Bom)
           $bytes = [System.IO.File]::ReadAllBytes($iss)
           if ($bytes.Length -lt 3 -or $bytes[0] -ne 0xEF -or $bytes[1] -ne 0xBB -or $bytes[2] -ne 0xBF) {
