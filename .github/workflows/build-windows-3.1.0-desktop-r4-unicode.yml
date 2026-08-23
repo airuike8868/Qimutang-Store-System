@@ -1,0 +1,370 @@
+name: Build Qimutang 3.1.0 Windows Desktop Client R4 Unicode
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows-desktop:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    env:
+      APP_VERSION: "3.1.0"
+      MYSQL_VERSION: "8.4.11"
+      SOURCE_ZIP: "qimutang-3.1.0-desktop-source-r3.zip"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Extract and verify 3.1.0 source
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $sourceZip = Join-Path $env:GITHUB_WORKSPACE $env:SOURCE_ZIP
+          if (!(Test-Path -LiteralPath $sourceZip)) {
+            throw "Missing source ZIP: $env:SOURCE_ZIP"
+          }
+          $work = Join-Path $env:RUNNER_TEMP "qimutang-310-source"
+          if (Test-Path $work) { Remove-Item $work -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $work | Out-Null
+          Expand-Archive -LiteralPath $sourceZip -DestinationPath $work -Force
+          $pom = Get-ChildItem -Path $work -Filter pom.xml -File -Recurse | Select-Object -First 1
+          if (!$pom) { throw "pom.xml not found" }
+          $projectDir = $pom.Directory.FullName
+
+          [xml]$pomXml = Get-Content $pom.FullName
+          if ($pomXml.project.version -ne $env:APP_VERSION) {
+            throw "Wrong Maven version: $($pomXml.project.version)"
+          }
+          $versionFile = Join-Path $projectDir 'VERSION.txt'
+          if (!(Test-Path $versionFile) -or (Get-Content $versionFile -Raw) -notmatch '^3\.1\.0') {
+            throw "VERSION.txt is not 3.1.0"
+          }
+          $desktopProject = Join-Path $projectDir 'desktop-client\QimutangDesktop.csproj'
+          $desktopProgram = Join-Path $projectDir 'desktop-client\Program.cs'
+          if (!(Test-Path $desktopProject) -or !(Test-Path $desktopProgram)) {
+            throw "3.1.0 desktop client source missing"
+          }
+          if ((Get-Content $desktopProject -Raw) -notmatch '<Version>3\.1\.0</Version>') {
+            throw "Desktop project version is not 3.1.0"
+          }
+          $programText = Get-Content $desktopProgram -Raw
+          if ($programText -notmatch 'spring\.profiles\.active=mysql' -or
+              $programText -notmatch 'EnsureMySqlReady' -or
+              $programText -notmatch 'InstallRoot') {
+            throw "Desktop MySQL bootstrap is incomplete"
+          }
+
+          "PROJECT_DIR=$projectDir" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Verified 3.1.0 source: $projectDir"
+
+      - name: Patch Java 17 compatibility
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+
+          function Ensure-Import([string]$file) {
+            $text = [System.IO.File]::ReadAllText($file)
+            if ($text.Length -gt 0 -and [int][char]$text[0] -eq 0xFEFF) { $text = $text.Substring(1) }
+            if ($text -notmatch 'import org\.springframework\.jdbc\.core\.ConnectionCallback;') {
+              if ($text -match 'import org\.springframework\.jdbc\.core\.JdbcTemplate;') {
+                $text = $text -replace 'import org\.springframework\.jdbc\.core\.JdbcTemplate;', "import org.springframework.jdbc.core.JdbcTemplate;`r`nimport org.springframework.jdbc.core.ConnectionCallback;"
+              } else {
+                $text = $text -replace '(package\s+[^;]+;)', "`$1`r`n`r`nimport org.springframework.jdbc.core.ConnectionCallback;"
+              }
+            }
+            return $text
+          }
+
+          $file = Get-ChildItem $env:PROJECT_DIR -Filter DbCompat.java -File -Recurse | Select-Object -First 1
+          if ($file) {
+            $text = Ensure-Import $file.FullName
+            $text = $text -replace 'db\.execute\(\s*connection\s*->', 'db.execute((ConnectionCallback<Boolean>) connection ->'
+            [System.IO.File]::WriteAllText($file.FullName,$text,$utf8NoBom)
+          }
+
+          $file = Get-ChildItem $env:PROJECT_DIR -Filter SqliteToMysqlMigrationService.java -File -Recurse | Select-Object -First 1
+          if ($file) {
+            $text = Ensure-Import $file.FullName
+            $text = $text -replace 'Boolean\s+result\s*=\s*target\.execute\(\s*connection\s*->', 'Boolean result = target.execute((ConnectionCallback<Boolean>) connection ->'
+            $text = $text -replace '(?m)^(\s*)target\.execute\(\s*connection\s*->', '$1target.execute((ConnectionCallback<Void>) connection ->'
+            [System.IO.File]::WriteAllText($file.FullName,$text,$utf8NoBom)
+          }
+
+          $file = Get-ChildItem $env:PROJECT_DIR -Filter MySqlReadinessService.java -File -Recurse | Select-Object -First 1
+          if ($file) {
+            $text = Ensure-Import $file.FullName
+            $text = $text -replace 'Map<String,Object>\s+meta\s*=\s*db\.execute\(\s*c\s*->', 'Map<String,Object> meta = db.execute((ConnectionCallback<Map<String,Object>>) c ->'
+            [System.IO.File]::WriteAllText($file.FullName,$text,$utf8NoBom)
+          }
+
+          $file = Get-ChildItem $env:PROJECT_DIR -Filter MySqlLogicalBackup.java -File -Recurse | Select-Object -First 1
+          if ($file) {
+            $text = Ensure-Import $file.FullName
+            $text = $text -replace 'db\.execute\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*->', 'db.execute((ConnectionCallback<Void>) $1 ->'
+            [System.IO.File]::WriteAllText($file.FullName,$text,$utf8NoBom)
+          }
+
+      - name: Build Java backend
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:PROJECT_DIR
+          mvn --batch-mode clean package -DskipTests
+          if ($LASTEXITCODE -ne 0) { throw "Maven build failed" }
+          $jar = Get-ChildItem target -Filter '*.jar' -File | Where-Object { $_.Name -notlike 'original-*' } | Sort-Object Length -Descending | Select-Object -First 1
+          if (!$jar) { throw "No application JAR generated" }
+          $targetJar = Join-Path $env:PROJECT_DIR 'target\qimutang.jar'
+          if (![string]::Equals([System.IO.Path]::GetFullPath($jar.FullName),[System.IO.Path]::GetFullPath($targetJar),[System.StringComparison]::OrdinalIgnoreCase)) {
+            Copy-Item $jar.FullName $targetJar -Force
+          }
+
+      - name: Build Windows desktop client
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $client = Join-Path $env:PROJECT_DIR 'desktop-client\QimutangDesktop.csproj'
+          $publish = Join-Path $env:RUNNER_TEMP 'qimutang-310-desktop-publish'
+          dotnet restore $client
+          dotnet publish $client -c Release -r win-x64 --self-contained true -o $publish --no-restore
+          if ($LASTEXITCODE -ne 0) { throw "Desktop client build failed" }
+          $clientExe = Join-Path $publish 'QimutangDesktop.exe'
+          if (!(Test-Path $clientExe)) { throw "QimutangDesktop.exe missing" }
+          $clientVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($clientExe).FileVersion
+          if ($clientVersion -notlike '3.1.0*') { throw "Wrong desktop file version: $clientVersion" }
+          "CLIENT_PUBLISH=$publish" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install Inno Setup
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          choco install innosetup --no-progress -y
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup installation failed" }
+
+      - name: Prepare offline desktop payload
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $stage = Join-Path $env:RUNNER_TEMP 'qimutang-310-stage'
+          if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path "$stage\app","$stage\client","$stage\mysql" | Out-Null
+
+          Copy-Item "$env:PROJECT_DIR\target\qimutang.jar" "$stage\app\qimutang.jar" -Force
+          Copy-Item "$env:CLIENT_PUBLISH\*" "$stage\client" -Recurse -Force
+          Copy-Item "$env:PROJECT_DIR\packaging\qimutang.ico" "$stage\qimutang.ico" -Force
+
+          $jlink = Join-Path $env:JAVA_HOME 'bin\jlink.exe'
+          $modules = 'java.base,java.compiler,java.datatransfer,java.desktop,java.instrument,java.logging,java.management,java.management.rmi,java.naming,java.net.http,java.prefs,java.rmi,java.security.jgss,java.security.sasl,java.sql,java.transaction.xa,java.xml,jdk.crypto.ec,jdk.management,jdk.naming.dns,jdk.unsupported,jdk.zipfs'
+          & $jlink --add-modules $modules --strip-debug --no-header-files --no-man-pages --compress=2 --output "$stage\runtime"
+          if ($LASTEXITCODE -ne 0 -or !(Test-Path "$stage\runtime\bin\javaw.exe")) {
+            throw "Java runtime image build failed"
+          }
+
+          $mysqlZip = Join-Path $env:RUNNER_TEMP "mysql-$env:MYSQL_VERSION-winx64.zip"
+          $mysqlUrl = "https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-$env:MYSQL_VERSION-winx64.zip"
+          & curl.exe -L --fail --retry 5 --retry-delay 3 --connect-timeout 30 -o $mysqlZip $mysqlUrl
+          if ($LASTEXITCODE -ne 0) { throw "MySQL download failed" }
+          $mysqlExtract = Join-Path $env:RUNNER_TEMP 'mysql-310-extracted'
+          if (Test-Path $mysqlExtract) { Remove-Item $mysqlExtract -Recurse -Force }
+          Expand-Archive -LiteralPath $mysqlZip -DestinationPath $mysqlExtract -Force
+          $mysqlRoot = Get-ChildItem $mysqlExtract -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'bin\mysqld.exe') } | Select-Object -First 1
+          if (!$mysqlRoot) { throw "mysqld.exe not found" }
+          Copy-Item "$($mysqlRoot.FullName)\*" "$stage\mysql" -Recurse -Force
+
+          $webview = Join-Path $stage 'MicrosoftEdgeWebview2Setup.exe'
+          & curl.exe -L --fail --retry 5 --retry-delay 3 -o $webview 'https://go.microsoft.com/fwlink/p/?LinkId=2124703'
+          if ($LASTEXITCODE -ne 0) { throw "WebView2 bootstrapper download failed" }
+
+          "STAGE_DIR=$stage" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Generate standard installer script
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $iss = Join-Path $env:RUNNER_TEMP 'qimutang-310.iss'
+          $output = Join-Path $env:GITHUB_WORKSPACE 'dist'
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+          $stage = $env:STAGE_DIR
+
+          $content = @"
+          [Setup]
+          AppId=QimutangStoreSystem310Desktop
+          AppName=齐沐堂门店管理系统
+          AppVersion=$env:APP_VERSION
+          AppVerName=齐沐堂门店管理系统 $env:APP_VERSION MySQL商业版
+          AppPublisher=齐沐堂
+          AppPublisherURL=https://github.com/airuike8868/Qimutang-Store-System
+          DefaultDirName={localappdata}\Programs\QimutangStore
+          DefaultGroupName=齐沐堂门店管理系统
+          DisableProgramGroupPage=yes
+          OutputDir=$output
+          OutputBaseFilename=Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-Unicode
+          SetupIconFile=$stage\qimutang.ico
+          UninstallDisplayIcon={app}\qimutang.ico
+          Compression=lzma2/max
+          SolidCompression=yes
+          LZMAUseSeparateProcess=yes
+          ArchitecturesAllowed=x64compatible
+          ArchitecturesInstallIn64BitMode=x64compatible
+          PrivilegesRequired=lowest
+          WizardStyle=modern
+          LanguageDetectionMethod=uilanguage
+          ShowLanguageDialog=no
+          UsePreviousLanguage=no
+          CloseApplications=yes
+          SetupLogging=yes
+          UninstallDisplayName=齐沐堂门店管理系统 3.1.0 MySQL商业版
+          VersionInfoVersion=3.1.0.0
+          VersionInfoProductVersion=3.1.0.0
+          VersionInfoCompany=齐沐堂
+          VersionInfoDescription=齐沐堂门店管理系统 3.1.0 MySQL商业版
+
+          [Languages]
+          Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+
+          [Files]
+          Source: "$stage\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "$stage\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "$stage\client\*"; DestDir: "{app}\client"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "$stage\mysql\*"; DestDir: "{app}\mysql"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "$stage\qimutang.ico"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "$stage\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+
+          [Icons]
+          Name: "{autoprograms}\齐沐堂门店管理系统"; Filename: "{app}\client\QimutangDesktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
+          Name: "{userdesktop}\齐沐堂门店管理系统"; Filename: "{app}\client\QimutangDesktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
+
+          [Run]
+          Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "正在准备桌面运行环境..."; Flags: waituntilterminated skipifdoesntexist
+          Filename: "{app}\client\QimutangDesktop.exe"; Description: "启动齐沐堂门店管理系统"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+          "@
+
+          $utf8Bom = New-Object System.Text.UTF8Encoding($true)
+          [System.IO.File]::WriteAllText($iss,$content,$utf8Bom)
+          $bytes = [System.IO.File]::ReadAllBytes($iss)
+          if ($bytes.Length -lt 3 -or $bytes[0] -ne 0xEF -or $bytes[1] -ne 0xBB -or $bytes[2] -ne 0xBF) {
+            throw "Installer script is not UTF-8 with BOM"
+          }
+          $roundTrip = [System.IO.File]::ReadAllText($iss,[System.Text.Encoding]::UTF8)
+          if ($roundTrip -notmatch 'ChineseSimplified\.isl' -or $roundTrip -notmatch '齐沐堂门店管理系统') {
+            throw "Chinese installer metadata is missing or corrupted"
+          }
+          "ISS_FILE=$iss" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Build EXE installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (!(Test-Path $iscc)) { $iscc = "${env:ProgramFiles}\Inno Setup 6\ISCC.exe" }
+          if (!(Test-Path $iscc)) { throw "ISCC.exe not found" }
+          & $iscc $env:ISS_FILE
+          if ($LASTEXITCODE -ne 0) { throw "Installer compilation failed" }
+
+      - name: Install and MySQL smoke test
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Get-ChildItem dist -Filter '*.exe' -File | Sort-Object Length -Descending | Select-Object -First 1
+          if (!$exe) { throw "Installer EXE missing" }
+          $install = Start-Process -FilePath $exe.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -Wait -PassThru
+          if ($install.ExitCode -ne 0) { throw "Silent install failed: $($install.ExitCode)" }
+
+          $installRoot = Join-Path $env:LOCALAPPDATA 'Programs\QimutangStore'
+          $client = Join-Path $installRoot 'client\QimutangDesktop.exe'
+          if (!(Test-Path $client) -or !(Test-Path (Join-Path $installRoot 'mysql\bin\mysqld.exe')) -or !(Test-Path (Join-Path $installRoot 'runtime\bin\javaw.exe'))) {
+            throw "Installed payload is incomplete"
+          }
+
+          $clientProcess = Start-Process -FilePath $client -WorkingDirectory $installRoot -PassThru
+          $health = $null
+          for ($i=0; $i -lt 180; $i++) {
+            Start-Sleep -Milliseconds 500
+            $portFile = Join-Path $env:USERPROFILE 'QimutangData\data\server.port'
+            if (!(Test-Path $portFile)) { continue }
+            $port = (Get-Content $portFile -Raw).Trim()
+            try {
+              $health = Invoke-RestMethod "http://127.0.0.1:$port/api/health" -TimeoutSec 2
+              if ($health.success) { break }
+            } catch { }
+          }
+
+          if (!$health -or !$health.success -or $health.data.version -ne '3.1.0' -or $health.data.database -ne 'mysql') {
+            $desktopLog = Join-Path $env:USERPROFILE 'QimutangData\data\logs\desktop-startup.log'
+            $appLog = Join-Path $env:USERPROFILE 'QimutangData\data\logs\qimutang.log'
+            $mysqlLog = Join-Path $env:USERPROFILE 'QimutangData\logs\mysql-error.log'
+            if (Test-Path $desktopLog) { Get-Content $desktopLog -Tail 200 }
+            if (Test-Path $appLog) { Get-Content $appLog -Tail 200 }
+            if (Test-Path $mysqlLog) { Get-Content $mysqlLog -Tail 200 }
+            throw "3.1.0 MySQL smoke test failed"
+          }
+          Write-Host "SMOKE TEST SUCCESS: version=$($health.data.version), database=$($health.data.database)"
+
+          New-Item -ItemType File -Force -Path (Join-Path $env:USERPROFILE 'QimutangData\data\shutdown.request') | Out-Null
+          Start-Sleep -Seconds 3
+          Get-Process mysqld -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
+          if (!$clientProcess.HasExited) { Stop-Process -Id $clientProcess.Id -Force -ErrorAction SilentlyContinue }
+
+      - name: Verify and scan installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          $exe = Get-ChildItem dist -Filter '*.exe' -File | Sort-Object Length -Descending | Select-Object -First 1
+          if (!$exe) { throw "Installer EXE missing" }
+          if ($exe.Length -lt 150MB) { throw "Installer unexpectedly small" }
+
+          $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe.FullName)
+          if ($versionInfo.FileVersion -notlike '3.1.0*' -or $versionInfo.ProductVersion -notlike '3.1.0*') {
+            throw "Installer version metadata is wrong: $($versionInfo.FileVersion) / $($versionInfo.ProductVersion)"
+          }
+          if ($versionInfo.CompanyName -ne '齐沐堂' -or $versionInfo.FileDescription -notmatch '齐沐堂门店管理系统') {
+            throw "Installer Chinese version metadata is corrupted"
+          }
+
+          if (Get-Command Start-MpScan -ErrorAction SilentlyContinue) {
+            try {
+              Start-MpScan -ScanType CustomScan -ScanPath $exe.FullName
+              $detections = Get-MpThreatDetection -ErrorAction SilentlyContinue | Where-Object {
+                ($_.Resources -join "`n") -like "*$($exe.Name)*"
+              }
+              if ($detections) { throw "Microsoft Defender detected the installer" }
+              Write-Host "Microsoft Defender custom scan completed without a matching detection."
+            } catch {
+              if ($_.Exception.Message -like '*detected*') { throw }
+              Write-Warning "Microsoft Defender scan was unavailable on this runner: $($_.Exception.Message)"
+            }
+          } else {
+            Write-Warning "Microsoft Defender cmdlets are unavailable on this runner."
+          }
+
+          $hash = Get-FileHash $exe.FullName -Algorithm SHA256
+          "$($hash.Hash.ToLower())  $($exe.Name)" | Set-Content 'dist\SHA256SUMS.txt' -Encoding ASCII
+          Write-Host "INSTALLER SUCCESS: $($exe.FullName)"
+          Write-Host "SIZE: $($exe.Length)"
+          Write-Host "SHA256: $($hash.Hash)"
+
+      - name: Upload 3.1.0 desktop installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-R4-Unicode
+          path: |
+            dist/*.exe
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
