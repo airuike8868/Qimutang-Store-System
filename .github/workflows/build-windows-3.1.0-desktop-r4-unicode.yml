@@ -1,4 +1,4 @@
-name: Build Qimutang 3.1.0 Windows Desktop Client R4 Unicode
+name: Build Qimutang 3.1.0 Windows Desktop Client R5 Unicode
 
 on:
   workflow_dispatch:
@@ -262,7 +262,8 @@ jobs:
             throw "Installer script is not UTF-8 with BOM"
           }
           $roundTrip = [System.IO.File]::ReadAllText($iss,[System.Text.Encoding]::UTF8)
-          if ($roundTrip -notmatch 'ChineseSimplified\.isl' -or $roundTrip -notmatch '齐沐堂门店管理系统') {
+          $expectedCompany = [System.Text.Encoding]::UTF8.GetString([byte[]](0xE9,0xBD,0x90,0xE6,0xB2,0x90,0xE5,0xA0,0x82))
+          if ($roundTrip -notmatch 'ChineseSimplified\.isl' -or !$roundTrip.Contains("AppName=$expectedCompany")) {
             throw "Chinese installer metadata is missing or corrupted"
           }
           "ISS_FILE=$iss" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
@@ -333,7 +334,8 @@ jobs:
           if ($versionInfo.FileVersion -notlike '3.1.0*' -or $versionInfo.ProductVersion -notlike '3.1.0*') {
             throw "Installer version metadata is wrong: $($versionInfo.FileVersion) / $($versionInfo.ProductVersion)"
           }
-          if ($versionInfo.CompanyName -ne '齐沐堂' -or $versionInfo.FileDescription -notmatch '齐沐堂门店管理系统') {
+          $expectedCompany = [System.Text.Encoding]::UTF8.GetString([byte[]](0xE9,0xBD,0x90,0xE6,0xB2,0x90,0xE5,0xA0,0x82))
+          if ($versionInfo.CompanyName -ne $expectedCompany -or !$versionInfo.FileDescription.StartsWith($expectedCompany)) {
             throw "Installer Chinese version metadata is corrupted"
           }
 
