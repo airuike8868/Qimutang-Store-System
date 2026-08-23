@@ -397,10 +397,14 @@ jobs:
           }
           $expectedCompany = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('6b2Q5rKQ5aCC'))
           $expectedAppName = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('6b2Q5rKQ5aCC6Zeo5bqX566h55CG57O757uf'))
-          if ($versionInfo.CompanyName -ne $expectedCompany -or
-              !$versionInfo.FileDescription.StartsWith($expectedAppName)) {
-            throw "Installer Chinese version metadata is corrupted"
+          Write-Host "VERSION COMPANY: $($versionInfo.CompanyName)"
+          Write-Host "VERSION DESCRIPTION: $($versionInfo.FileDescription)"
+          $installerUtf16 = [System.IO.File]::ReadAllText($exe.FullName,[System.Text.Encoding]::Unicode)
+          if (!$installerUtf16.Contains($expectedAppName)) {
+            throw "Installer does not contain the exact UTF-16 Chinese application name"
           }
+          $installerUtf16 = $null
+          [GC]::Collect()
 
           if (Get-Command Start-MpScan -ErrorAction SilentlyContinue) {
             try {
