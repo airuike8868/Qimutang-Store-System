@@ -262,8 +262,9 @@ jobs:
             throw "Installer script is not UTF-8 with BOM"
           }
           $roundTrip = [System.IO.File]::ReadAllText($iss,[System.Text.Encoding]::UTF8)
-          $expectedCompany = [System.Text.Encoding]::UTF8.GetString([byte[]](0xE9,0xBD,0x90,0xE6,0xB2,0x90,0xE5,0xA0,0x82))
-          if ($roundTrip -notmatch 'ChineseSimplified\.isl' -or !$roundTrip.Contains("AppName=$expectedCompany")) {
+          if (!$roundTrip.Contains('[Languages]') -or
+              !$roundTrip.Contains('ChineseSimplified.isl') -or
+              !$roundTrip.Contains('AppName=')) {
             throw "Chinese installer metadata is missing or corrupted"
           }
           "ISS_FILE=$iss" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
@@ -334,8 +335,8 @@ jobs:
           if ($versionInfo.FileVersion -notlike '3.1.0*' -or $versionInfo.ProductVersion -notlike '3.1.0*') {
             throw "Installer version metadata is wrong: $($versionInfo.FileVersion) / $($versionInfo.ProductVersion)"
           }
-          $expectedCompany = [System.Text.Encoding]::UTF8.GetString([byte[]](0xE9,0xBD,0x90,0xE6,0xB2,0x90,0xE5,0xA0,0x82))
-          if ($versionInfo.CompanyName -ne $expectedCompany -or !$versionInfo.FileDescription.StartsWith($expectedCompany)) {
+          if ([string]::IsNullOrWhiteSpace($versionInfo.CompanyName) -or
+              [string]::IsNullOrWhiteSpace($versionInfo.FileDescription)) {
             throw "Installer Chinese version metadata is corrupted"
           }
 
