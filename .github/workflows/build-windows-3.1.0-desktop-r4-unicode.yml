@@ -1,4 +1,4 @@
-name: Build Qimutang 3.1.0 Windows Desktop Client R8 Final Startup Fix
+name: Build Qimutang 3.1.0 Windows Desktop Client R9 Dashboard MySQL Fix
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
     env:
       APP_VERSION: "3.1.0"
       MYSQL_VERSION: "8.4.11"
-      SOURCE_ZIP: "qimutang-3.1.0-desktop-source-r5.zip"
+      SOURCE_ZIP: "qimutang-3.1.0-desktop-source-r6.zip"
 
     steps:
       - name: Checkout
@@ -234,7 +234,7 @@ jobs:
           DefaultGroupName=$appName
           DisableProgramGroupPage=yes
           OutputDir=$output
-          OutputBaseFilename=Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-Final-R4
+          OutputBaseFilename=Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-Final-R5
           SetupIconFile=$stage\qimutang.ico
           UninstallDisplayIcon={app}\qimutang.ico
           Compression=lzma2/max
@@ -378,6 +378,17 @@ jobs:
           }
           Write-Host "SMOKE TEST SUCCESS: version=$($health.data.version), database=$($health.data.database)"
 
+          $loginBody = @{ username = 'admin'; password = '123456' } | ConvertTo-Json
+          $login = Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:$port/api/auth/login" -ContentType 'application/json; charset=utf-8' -Body $loginBody -TimeoutSec 10
+          if (!$login.success -or !$login.data.token) { throw "Administrator login smoke test failed" }
+          $headers = @{ Authorization = "Bearer $($login.data.token)" }
+          $dashboard = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/dashboard" -Headers $headers -TimeoutSec 10
+          $dashboardExtended = Invoke-RestMethod -Uri "http://127.0.0.1:$port/api/dashboard/extended" -Headers $headers -TimeoutSec 10
+          if (!$dashboard.success -or !$dashboardExtended.success) {
+            throw "Dashboard API smoke test failed"
+          }
+          Write-Host "DASHBOARD TEST SUCCESS: base and extended MySQL statistics loaded"
+
           New-Item -ItemType File -Force -Path (Join-Path $env:USERPROFILE 'QimutangData\data\shutdown.request') | Out-Null
           Start-Sleep -Seconds 3
           Get-Process mysqld -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
@@ -431,7 +442,7 @@ jobs:
       - name: Upload 3.1.0 desktop installer
         uses: actions/upload-artifact@v4
         with:
-          name: Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-R8-Final-Startup-Fix
+          name: Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-R9-Dashboard-MySQL-Fix
           path: |
             dist/*.exe
             dist/SHA256SUMS.txt
