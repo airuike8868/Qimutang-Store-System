@@ -39,7 +39,7 @@ jobs:
           if (!(Test-Path -LiteralPath $sourceZip)) {
             throw "Missing source ZIP: $env:SOURCE_ZIP"
           }
-          $work = Join-Path $env:RUNNER_TEMP "qimutang-310-source"
+          $work = Join-Path $env:RUNNER_TEMP "qimutang-311-source"
           if (Test-Path $work) { Remove-Item $work -Recurse -Force }
           New-Item -ItemType Directory -Force -Path $work | Out-Null
           Expand-Archive -LiteralPath $sourceZip -DestinationPath $work -Force
@@ -52,7 +52,7 @@ jobs:
             throw "Wrong Maven version: $($pomXml.project.version)"
           }
           $versionFile = Join-Path $projectDir 'VERSION.txt'
-          if (!(Test-Path $versionFile) -or (Get-Content $versionFile -Raw) -notmatch '^3\.1\.0') {
+          if (!(Test-Path $versionFile) -or (Get-Content $versionFile -Raw) -notmatch '^3\.1\.1') {
             throw "VERSION.txt is not 3.1.1"
           }
           $desktopProject = Join-Path $projectDir 'desktop-client\QimutangDesktop.csproj'
@@ -60,7 +60,7 @@ jobs:
           if (!(Test-Path $desktopProject) -or !(Test-Path $desktopProgram)) {
             throw "3.1.1 desktop client source missing"
           }
-          if ((Get-Content $desktopProject -Raw) -notmatch '<Version>3\.1\.0</Version>') {
+          if ((Get-Content $desktopProject -Raw) -notmatch '<Version>3\.1\.1</Version>') {
             throw "Desktop project version is not 3.1.1"
           }
           $programText = Get-Content $desktopProgram -Raw
