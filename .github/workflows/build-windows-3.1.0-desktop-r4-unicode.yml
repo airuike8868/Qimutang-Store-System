@@ -1,4 +1,4 @@
-name: Build Qimutang 3.1.0 Windows Desktop Client R6 Startup Fix
+name: Build Qimutang 3.1.0 Windows Desktop Client R7 Encoding Fix
 
 on:
   workflow_dispatch:
@@ -213,19 +213,28 @@ jobs:
           $utf8Bom = New-Object System.Text.UTF8Encoding($true)
           [System.IO.File]::WriteAllText($lang,$langText,$utf8Bom)
 
+          function From-Utf8Base64([string]$value) {
+            return [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($value))
+          }
+          $company = From-Utf8Base64 '6b2Q5rKQ5aCC'
+          $appName = From-Utf8Base64 '6b2Q5rKQ5aCC6Zeo5bqX566h55CG57O757uf'
+          $appDisplayName = From-Utf8Base64 '6b2Q5rKQ5aCC6Zeo5bqX566h55CG57O757ufIDMuMS4wIE15U1FM5ZWG5Lia54mI'
+          $runStatus = From-Utf8Base64 '5q2j5Zyo5YeG5aSH5qGM6Z2i6L+Q6KGM546v5aKDLi4u'
+          $runDescription = From-Utf8Base64 '5ZCv5Yqo6b2Q5rKQ5aCC6Zeo5bqX566h55CG57O757uf'
+
           $content = @"
           [Setup]
           AppId=QimutangStoreSystem310Desktop
-          AppName=齐沐堂门店管理系统
+          AppName=$appName
           AppVersion=$env:APP_VERSION
-          AppVerName=齐沐堂门店管理系统 $env:APP_VERSION MySQL商业版
-          AppPublisher=齐沐堂
+          AppVerName=$appDisplayName
+          AppPublisher=$company
           AppPublisherURL=https://github.com/airuike8868/Qimutang-Store-System
           DefaultDirName={localappdata}\Programs\QimutangStore
-          DefaultGroupName=齐沐堂门店管理系统
+          DefaultGroupName=$appName
           DisableProgramGroupPage=yes
           OutputDir=$output
-          OutputBaseFilename=Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-Unicode-R2
+          OutputBaseFilename=Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-Unicode-R3
           SetupIconFile=$stage\qimutang.ico
           UninstallDisplayIcon={app}\qimutang.ico
           Compression=lzma2/max
@@ -240,11 +249,11 @@ jobs:
           UsePreviousLanguage=no
           CloseApplications=yes
           SetupLogging=yes
-          UninstallDisplayName=齐沐堂门店管理系统 3.1.0 MySQL商业版
+          UninstallDisplayName=$appDisplayName
           VersionInfoVersion=3.1.0.0
           VersionInfoProductVersion=3.1.0.0
-          VersionInfoCompany=齐沐堂
-          VersionInfoDescription=齐沐堂门店管理系统 3.1.0 MySQL商业版
+          VersionInfoCompany=$company
+          VersionInfoDescription=$appDisplayName
 
           [Languages]
           Name: "chinesesimp"; MessagesFile: "$lang"
@@ -262,8 +271,8 @@ jobs:
           Name: "{userdesktop}\Qimutang 3.1.0"; Filename: "{app}\client\QimutangDesktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
 
           [Run]
-          Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "正在准备桌面运行环境..."; Flags: waituntilterminated skipifdoesntexist
-          Filename: "{app}\client\QimutangDesktop.exe"; Description: "启动齐沐堂门店管理系统"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
+          Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "$runStatus"; Flags: waituntilterminated skipifdoesntexist
+          Filename: "{app}\client\QimutangDesktop.exe"; Description: "$runDescription"; WorkingDir: "{app}"; Flags: nowait postinstall skipifsilent
 
           [Code]
           procedure RemoveLegacyShortcuts(const Root: string);
@@ -314,7 +323,8 @@ jobs:
           $roundTrip = [System.IO.File]::ReadAllText($iss,[System.Text.Encoding]::UTF8)
           if (!$roundTrip.Contains('[Languages]') -or
               !$roundTrip.Contains('ChineseSimplified.isl') -or
-              !$roundTrip.Contains('AppName=')) {
+              !$roundTrip.Contains("AppName=$appName") -or
+              !$roundTrip.Contains("VersionInfoCompany=$company")) {
             throw "Chinese installer metadata is missing or corrupted"
           }
           "ISS_FILE=$iss" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
@@ -385,8 +395,10 @@ jobs:
           if ($versionInfo.FileVersion -notlike '3.1.0*' -or $versionInfo.ProductVersion -notlike '3.1.0*') {
             throw "Installer version metadata is wrong: $($versionInfo.FileVersion) / $($versionInfo.ProductVersion)"
           }
-          if ([string]::IsNullOrWhiteSpace($versionInfo.CompanyName) -or
-              [string]::IsNullOrWhiteSpace($versionInfo.FileDescription)) {
+          $expectedCompany = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('6b2Q5rKQ5aCC'))
+          $expectedAppName = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('6b2Q5rKQ5aCC6Zeo5bqX566h55CG57O757uf'))
+          if ($versionInfo.CompanyName -ne $expectedCompany -or
+              !$versionInfo.FileDescription.StartsWith($expectedAppName)) {
             throw "Installer Chinese version metadata is corrupted"
           }
 
@@ -415,7 +427,7 @@ jobs:
       - name: Upload 3.1.0 desktop installer
         uses: actions/upload-artifact@v4
         with:
-          name: Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-R6-Startup-Fix
+          name: Qimutang-3.1.0-MySQL-Commercial-Windows-Installer-R7-Encoding-Fix
           path: |
             dist/*.exe
             dist/SHA256SUMS.txt
