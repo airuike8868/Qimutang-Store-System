@@ -269,7 +269,7 @@ jobs:
           procedure RemoveLegacyShortcuts(const Root: string);
           var
             FindRec: TFindRec;
-            ShortcutPath, Combined: string;
+            ShortcutPath, TargetPath, Arguments, Combined: string;
             Shell, Shortcut: Variant;
           begin
             if not DirExists(Root) then Exit;
@@ -281,7 +281,9 @@ jobs:
                   ShortcutPath := AddBackslash(Root) + FindRec.Name;
                   try
                     Shortcut := Shell.CreateShortcut(ShortcutPath);
-                    Combined := Lowercase(Shortcut.TargetPath + ' ' + Shortcut.Arguments);
+                    TargetPath := Shortcut.TargetPath;
+                    Arguments := Shortcut.Arguments;
+                    Combined := Lowercase(TargetPath + ' ' + Arguments);
                     if (Pos('qimutangdesktop.exe', Combined) > 0) or
                        (Pos('qimutang.jar', Combined) > 0) then
                       DeleteFile(ShortcutPath);
