@@ -1,10 +1,10 @@
-name: Build Qimutang 3.3.0 Windows Desktop Commercial Final
+name: Build Qimutang 3.3.3 Windows Desktop Commercial Final
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - "qimutang-3.3.0-desktop-source-final.zip"
+      - "qimutang-3.3.3-desktop-source-final.zip"
       - ".github/workflows/build-windows-3.3.0-desktop-final.yml"
 
 permissions:
@@ -16,9 +16,9 @@ jobs:
     timeout-minutes: 90
 
     env:
-      APP_VERSION: "3.3.0"
+      APP_VERSION: "3.3.3"
       MYSQL_VERSION: "8.4.11"
-      SOURCE_ZIP: "qimutang-3.3.0-desktop-source-final.zip"
+      SOURCE_ZIP: "qimutang-3.3.3-desktop-source-final.zip"
 
     steps:
       - name: Checkout
@@ -35,7 +35,7 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
-      - name: Extract and verify 3.3.0 source
+      - name: Extract and verify 3.3.3 source
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
@@ -43,7 +43,7 @@ jobs:
           if (!(Test-Path -LiteralPath $sourceZip)) {
             throw "Missing source ZIP: $env:SOURCE_ZIP"
           }
-          $work = Join-Path $env:RUNNER_TEMP "qimutang-330-source"
+          $work = Join-Path $env:RUNNER_TEMP "qimutang-333-source"
           if (Test-Path $work) { Remove-Item $work -Recurse -Force }
           New-Item -ItemType Directory -Force -Path $work | Out-Null
           Expand-Archive -LiteralPath $sourceZip -DestinationPath $work -Force
@@ -56,16 +56,16 @@ jobs:
             throw "Wrong Maven version: $($pomXml.project.version)"
           }
           $versionFile = Join-Path $projectDir 'VERSION.txt'
-          if (!(Test-Path $versionFile) -or (Get-Content $versionFile -Raw) -notmatch '^3\.3\.0') {
-            throw "VERSION.txt is not 3.3.0"
+          if (!(Test-Path $versionFile) -or (Get-Content $versionFile -Raw) -notmatch '^3\.3\.3') {
+            throw "VERSION.txt is not 3.3.3"
           }
           $desktopProject = Join-Path $projectDir 'desktop-client\QimutangDesktop.csproj'
           $desktopProgram = Join-Path $projectDir 'desktop-client\Program.cs'
           if (!(Test-Path $desktopProject) -or !(Test-Path $desktopProgram)) {
-            throw "3.3.0 desktop client source missing"
+            throw "3.3.3 desktop client source missing"
           }
-          if ((Get-Content $desktopProject -Raw) -notmatch '<Version>3\.3\.0</Version>') {
-            throw "Desktop project version is not 3.3.0"
+          if ((Get-Content $desktopProject -Raw) -notmatch '<Version>3\.3\.3</Version>') {
+            throw "Desktop project version is not 3.3.3"
           }
           $programText = Get-Content $desktopProgram -Raw
           if ($programText -notmatch 'spring\.profiles\.active=mysql' -or
@@ -75,7 +75,17 @@ jobs:
           }
 
           "PROJECT_DIR=$projectDir" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
-          Write-Host "Verified 3.3.0 source: $projectDir"
+          Write-Host "Verified 3.3.3 source: $projectDir"
+
+      - name: Verify 3.3.3 catalog and UI source
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location $env:PROJECT_DIR
+          node scripts/ui-structure-test.cjs
+          if ($LASTEXITCODE -ne 0) { throw "UI structure test failed" }
+          node scripts/catalog-seed-test.cjs
+          if ($LASTEXITCODE -ne 0) { throw "Catalog seed test failed" }
 
       - name: Patch Java 17 compatibility
         shell: powershell
@@ -144,14 +154,14 @@ jobs:
         run: |
           $ErrorActionPreference = "Stop"
           $client = Join-Path $env:PROJECT_DIR 'desktop-client\QimutangDesktop.csproj'
-          $publish = Join-Path $env:RUNNER_TEMP 'qimutang-330-desktop-publish'
+          $publish = Join-Path $env:RUNNER_TEMP 'qimutang-333-desktop-publish'
           dotnet restore $client
           dotnet publish $client -c Release -r win-x64 --self-contained true -o $publish --no-restore
           if ($LASTEXITCODE -ne 0) { throw "Desktop client build failed" }
           $clientExe = Join-Path $publish 'QimutangDesktop.exe'
           if (!(Test-Path $clientExe)) { throw "QimutangDesktop.exe missing" }
           $clientVersion = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($clientExe).FileVersion
-          if ($clientVersion -notlike '3.3.0*') { throw "Wrong desktop file version: $clientVersion" }
+          if ($clientVersion -notlike '3.3.3*') { throw "Wrong desktop file version: $clientVersion" }
           "CLIENT_PUBLISH=$publish" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Sign desktop client when release certificate is configured
@@ -191,7 +201,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $stage = Join-Path $env:RUNNER_TEMP 'qimutang-330-stage'
+          $stage = Join-Path $env:RUNNER_TEMP 'qimutang-333-stage'
           if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
           New-Item -ItemType Directory -Force -Path "$stage\app","$stage\client","$stage\mysql" | Out-Null
 
@@ -210,7 +220,7 @@ jobs:
           $mysqlUrl = "https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-$env:MYSQL_VERSION-winx64.zip"
           & curl.exe -L --fail --retry 5 --retry-delay 3 --connect-timeout 30 -o $mysqlZip $mysqlUrl
           if ($LASTEXITCODE -ne 0) { throw "MySQL download failed" }
-          $mysqlExtract = Join-Path $env:RUNNER_TEMP 'mysql-310-extracted'
+          $mysqlExtract = Join-Path $env:RUNNER_TEMP 'mysql-333-extracted'
           if (Test-Path $mysqlExtract) { Remove-Item $mysqlExtract -Recurse -Force }
           Expand-Archive -LiteralPath $mysqlZip -DestinationPath $mysqlExtract -Force
           $mysqlRoot = Get-ChildItem $mysqlExtract -Directory | Where-Object { Test-Path (Join-Path $_.FullName 'bin\mysqld.exe') } | Select-Object -First 1
@@ -227,7 +237,7 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $iss = Join-Path $env:RUNNER_TEMP 'qimutang-310.iss'
+          $iss = Join-Path $env:RUNNER_TEMP 'qimutang-333.iss'
           $output = Join-Path $env:GITHUB_WORKSPACE 'dist'
           New-Item -ItemType Directory -Force -Path $output | Out-Null
           $stage = $env:STAGE_DIR
@@ -248,7 +258,7 @@ jobs:
           }
           $company = From-Utf8Base64 '6b2Q5rKQ5aCC'
           $appName = From-Utf8Base64 '6b2Q5rKQ5aCC6Zeo5bqX566h55CG57O757uf'
-          $appDisplayName = From-Utf8Base64 '6b2Q5rKQ5aCC6Zeo5bqX566h55CG57O757ufIDMuMy4wIE15U1FM5ZWG5Lia54mI'
+          $appDisplayName = From-Utf8Base64 '6b2Q5rKQ5aCC6Zeo5bqX566h55CG57O757ufIDMuMy4zIE15U1FM5ZWG5Lia54mI'
           $runStatus = From-Utf8Base64 '5q2j5Zyo5YeG5aSH5qGM6Z2i6L+Q6KGM546v5aKDLi4u'
           $runDescription = From-Utf8Base64 '5ZCv5Yqo6b2Q5rKQ5aCC6Zeo5bqX566h55CG57O757uf'
 
@@ -264,7 +274,7 @@ jobs:
           DefaultGroupName=$appName
           DisableProgramGroupPage=yes
           OutputDir=$output
-          OutputBaseFilename=Qimutang-3.3.0-MySQL-Commercial-Windows-Installer-Final
+          OutputBaseFilename=Qimutang-3.3.3-MySQL-Commercial-Windows-Installer-Final
           SetupIconFile=$stage\qimutang.ico
           UninstallDisplayIcon={app}\qimutang.ico
           Compression=lzma2/max
@@ -280,8 +290,8 @@ jobs:
           CloseApplications=yes
           SetupLogging=yes
           UninstallDisplayName=$appDisplayName
-          VersionInfoVersion=3.3.0.0
-          VersionInfoProductVersion=3.3.0.0
+          VersionInfoVersion=3.3.3.0
+          VersionInfoProductVersion=3.3.3.0
           VersionInfoCompany=$company
           VersionInfoDescription=$appDisplayName
 
@@ -297,8 +307,8 @@ jobs:
           Source: "$stage\MicrosoftEdgeWebview2Setup.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
 
           [Icons]
-          Name: "{autoprograms}\Qimutang 3.3.0"; Filename: "{app}\client\QimutangDesktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
-          Name: "{userdesktop}\Qimutang 3.3.0"; Filename: "{app}\client\QimutangDesktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
+          Name: "{autoprograms}\$appName"; Filename: "{app}\client\QimutangDesktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
+          Name: "{userdesktop}\$appName"; Filename: "{app}\client\QimutangDesktop.exe"; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
 
           [Run]
           Filename: "{tmp}\MicrosoftEdgeWebview2Setup.exe"; Parameters: "/silent /install"; StatusMsg: "$runStatus"; Flags: waituntilterminated skipifdoesntexist
@@ -414,14 +424,14 @@ jobs:
             } catch { }
           }
 
-          if (!$health -or !$health.success -or $health.data.version -ne '3.3.0' -or $health.data.database -ne 'mysql') {
+          if (!$health -or !$health.success -or $health.data.version -ne '3.3.3' -or $health.data.database -ne 'mysql') {
             $desktopLog = Join-Path $env:USERPROFILE 'QimutangData\data\logs\desktop-startup.log'
             $appLog = Join-Path $env:USERPROFILE 'QimutangData\data\logs\qimutang.log'
             $mysqlLog = Join-Path $env:USERPROFILE 'QimutangData\logs\mysql-error.log'
             if (Test-Path $desktopLog) { Get-Content $desktopLog -Tail 200 }
             if (Test-Path $appLog) { Get-Content $appLog -Tail 200 }
             if (Test-Path $mysqlLog) { Get-Content $mysqlLog -Tail 200 }
-            throw "3.3.0 MySQL smoke test failed"
+            throw "3.3.3 MySQL smoke test failed"
           }
           Write-Host "SMOKE TEST SUCCESS: version=$($health.data.version), database=$($health.data.database)"
 
@@ -444,12 +454,12 @@ jobs:
           if (!$dashboard.success -or !$dashboardExtended.success -or !$globalSearch.success -or !$branding.success -or
               !$workstations.success -or !$employeeStates.success -or !$reminders.success -or !$risks.success -or
               !$publicLicense.success -or !$systemStatus.success -or !$settings.success -or !$auditIntegrity.success -or
-              $systemStatus.data.version -ne '3.3.0' -or !$systemStatus.data.databaseReady -or !$auditIntegrity.data.valid) {
-            throw "3.3.0 operations API smoke test failed"
+              $systemStatus.data.version -ne '3.3.3' -or !$systemStatus.data.databaseReady -or !$auditIntegrity.data.valid) {
+            throw "3.3.3 operations API smoke test failed"
           }
           Write-Host "DASHBOARD TEST SUCCESS: base and extended MySQL statistics loaded"
           Write-Host "GLOBAL SEARCH TEST SUCCESS: customer and order lookup query loaded"
-          Write-Host "3.3.0 OPERATIONS TEST SUCCESS: branding, workstations, queue, reminders and risks loaded"
+          Write-Host "3.3.3 OPERATIONS TEST SUCCESS: branding, workstations, queue, reminders and risks loaded"
 
           New-Item -ItemType File -Force -Path (Join-Path $env:USERPROFILE 'QimutangData\data\shutdown.request') | Out-Null
           Start-Sleep -Seconds 3
@@ -465,7 +475,7 @@ jobs:
           if ($exe.Length -lt 150MB) { throw "Installer unexpectedly small" }
 
           $versionInfo = [System.Diagnostics.FileVersionInfo]::GetVersionInfo($exe.FullName)
-          if ($versionInfo.FileVersion -notlike '3.3.0*' -or $versionInfo.ProductVersion -notlike '3.3.0*') {
+          if ($versionInfo.FileVersion -notlike '3.3.3*' -or $versionInfo.ProductVersion -notlike '3.3.3*') {
             throw "Installer version metadata is wrong: $($versionInfo.FileVersion) / $($versionInfo.ProductVersion)"
           }
           $expectedCompany = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('6b2Q5rKQ5aCC'))
@@ -501,10 +511,10 @@ jobs:
           Write-Host "SIZE: $($exe.Length)"
           Write-Host "SHA256: $($hash.Hash)"
 
-      - name: Upload 3.3.0 desktop installer
+      - name: Upload 3.3.3 desktop installer
         uses: actions/upload-artifact@v4
         with:
-          name: Qimutang-3.3.0-MySQL-Commercial-Windows-Installer-Final-Operations
+          name: Qimutang-3.3.3-MySQL-Commercial-Windows-Installer-Final-Operations
           path: |
             dist/*.exe
             dist/SHA256SUMS.txt
