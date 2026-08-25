@@ -1,0 +1,58 @@
+name: Publish Qimutang 3.3.0 R2 Release
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/publish-3.3.0-r2.yml"
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download verified Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Qimutang-3.3.0-MySQL-Commercial-Windows-Installer-R2-Cache-Fix
+          path: dist
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: 32878139973
+
+      - name: Verify release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/Qimutang-3.3.0-MySQL-Commercial-Windows-Installer-R2.exe
+          test -f dist/SHA256SUMS.txt
+          test -f dist/SIGNING-STATUS.txt
+          (cd dist && sha256sum -c SHA256SUMS.txt)
+          test "$(stat -c%s dist/Qimutang-3.3.0-MySQL-Commercial-Windows-Installer-R2.exe)" -gt 157286400
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v3.3.0-r2
+          name: 齐沐堂门店管理系统 3.3.0 R2
+          prerelease: true
+          make_latest: false
+          body: |
+            3.3.0 R2 修复版。
+
+            - 修复 WebView2 旧缓存调用错误接口导致的“页面加载失败”。
+            - 客户端严格校验 3.3.0 后台版本，防止不同版本后台混用。
+            - 首次安装或数据升级允许后台完整初始化，不再因固定超时强制重启。
+            - 已在 Windows 环境完成静默安装、MySQL 8.4.11 初始化、管理员登录、首页、收银分类、员工选择、系统设置和审计接口验收。
+            - 覆盖安装会继续使用现有 QimutangData 数据；安装前仍建议先备份。
+
+            请同时下载 SHA256SUMS.txt 校验安装包完整性，并查看 SIGNING-STATUS.txt 确认代码签名状态。
+          files: |
+            dist/Qimutang-3.3.0-MySQL-Commercial-Windows-Installer-R2.exe
+            dist/SHA256SUMS.txt
+            dist/SIGNING-STATUS.txt
+          fail_on_unmatched_files: true
+          overwrite_files: true
