@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "qimutang-3.3.0-desktop-source-r2.zip"
+      - "qimutang-3.3.0-desktop-source-r2b.zip"
       - ".github/workflows/build-windows-3.3.0-r2.yml"
 
 permissions:
@@ -18,7 +18,7 @@ jobs:
     env:
       APP_VERSION: "3.3.0"
       MYSQL_VERSION: "8.4.11"
-      SOURCE_ZIP: "qimutang-3.3.0-desktop-source-r2.zip"
+      SOURCE_ZIP: "qimutang-3.3.0-desktop-source-r2b.zip"
 
     steps:
       - name: Checkout
@@ -411,15 +411,18 @@ jobs:
 
           $clientProcess = Start-Process -FilePath $client -WorkingDirectory $installRoot -PassThru
           $health = $null
-          for ($i=0; $i -lt 180; $i++) {
+          # A cold first-run schema creation can legitimately take several minutes.
+          # Keep polling instead of reporting a false failure while Java/MySQL initialize.
+          for ($i=0; $i -lt 960; $i++) {
             Start-Sleep -Milliseconds 500
             $portFile = Join-Path $env:USERPROFILE 'QimutangData\data\server.port'
             if (!(Test-Path $portFile)) { continue }
             $port = (Get-Content $portFile -Raw).Trim()
             try {
               $health = Invoke-RestMethod "http://127.0.0.1:$port/api/health" -TimeoutSec 2
-              if ($health.success) { break }
+              if ($health.success -and $health.data.version -eq '3.3.0' -and $health.data.database -eq 'mysql') { break }
             } catch { }
+            if (($i % 20) -eq 0) { Write-Host "Waiting for installed 3.3.0 MySQL backend... $([math]::Round($i / 2))s" }
           }
 
           if (!$health -or !$health.success -or $health.data.version -ne '3.3.0' -or $health.data.database -ne 'mysql') {
