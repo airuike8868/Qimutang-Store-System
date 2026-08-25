@@ -1,10 +1,10 @@
-name: Build Qimutang 3.3.3 Windows Desktop Commercial Final
+name: Build Qimutang 3.3.3 R3 Global UI
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - "qimutang-3.3.3-desktop-source-final.zip"
+      - "qimutang-3.3.3-desktop-source-r3-ui.zip"
       - ".github/workflows/build-windows-3.3.0-desktop-final.yml"
 
 permissions:
@@ -18,7 +18,7 @@ jobs:
     env:
       APP_VERSION: "3.3.3"
       MYSQL_VERSION: "8.4.11"
-      SOURCE_ZIP: "qimutang-3.3.3-desktop-source-final.zip"
+      SOURCE_ZIP: "qimutang-3.3.3-desktop-source-r3-ui.zip"
 
     steps:
       - name: Checkout
@@ -70,8 +70,16 @@ jobs:
           $programText = Get-Content $desktopProgram -Raw
           if ($programText -notmatch 'spring\.profiles\.active=mysql' -or
               $programText -notmatch 'EnsureMySqlReady' -or
-              $programText -notmatch 'InstallRoot') {
+              $programText -notmatch 'InstallRoot' -or
+              $programText -notmatch 'ExpectedBackendVersion = "3\.3\.3"' -or
+              $programText -notmatch 'ClientBuild = "3\.3\.3-r3-ui"' -or
+              $programText -notmatch 'JsonDocument\.Parse') {
             throw "Desktop MySQL bootstrap is incomplete"
+          }
+          $indexFile = Join-Path $projectDir 'src\main\resources\static\index.html'
+          $indexText = Get-Content $indexFile -Raw
+          if ($indexText -notmatch 'v=3\.3\.3-r3-ui') {
+            throw "R3 global UI static resource cache key is missing"
           }
 
           "PROJECT_DIR=$projectDir" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
@@ -258,7 +266,7 @@ jobs:
           }
           $company = From-Utf8Base64 '6b2Q5rKQ5aCC'
           $appName = From-Utf8Base64 '6b2Q5rKQ5aCC6Zeo5bqX566h55CG57O757uf'
-          $appDisplayName = From-Utf8Base64 '6b2Q5rKQ5aCC6Zeo5bqX566h55CG57O757ufIDMuMy4zIE15U1FM5ZWG5Lia54mI'
+          $appDisplayName = From-Utf8Base64 '6b2Q5rKQ5aCC6Zeo5bqX566h55CG57O757ufIDMuMy4z'
           $runStatus = From-Utf8Base64 '5q2j5Zyo5YeG5aSH5qGM6Z2i6L+Q6KGM546v5aKDLi4u'
           $runDescription = From-Utf8Base64 '5ZCv5Yqo6b2Q5rKQ5aCC6Zeo5bqX566h55CG57O757uf'
 
@@ -274,7 +282,7 @@ jobs:
           DefaultGroupName=$appName
           DisableProgramGroupPage=yes
           OutputDir=$output
-          OutputBaseFilename=Qimutang-3.3.3-MySQL-Commercial-Windows-Installer-Final
+          OutputBaseFilename=Qimutang-Store-System-3.3.3-R3-Windows-Installer
           SetupIconFile=$stage\qimutang.ico
           UninstallDisplayIcon={app}\qimutang.ico
           Compression=lzma2/max
@@ -413,15 +421,17 @@ jobs:
 
           $clientProcess = Start-Process -FilePath $client -WorkingDirectory $installRoot -PassThru
           $health = $null
-          for ($i=0; $i -lt 180; $i++) {
+          # A cold first-run schema creation can legitimately take several minutes.
+          for ($i=0; $i -lt 960; $i++) {
             Start-Sleep -Milliseconds 500
             $portFile = Join-Path $env:USERPROFILE 'QimutangData\data\server.port'
             if (!(Test-Path $portFile)) { continue }
             $port = (Get-Content $portFile -Raw).Trim()
             try {
               $health = Invoke-RestMethod "http://127.0.0.1:$port/api/health" -TimeoutSec 2
-              if ($health.success) { break }
+              if ($health.success -and $health.data.version -eq '3.3.3' -and $health.data.database -eq 'mysql') { break }
             } catch { }
+            if (($i % 20) -eq 0) { Write-Host "Waiting for installed 3.3.3 MySQL backend... $([math]::Round($i / 2))s" }
           }
 
           if (!$health -or !$health.success -or $health.data.version -ne '3.3.3' -or $health.data.database -ne 'mysql') {
@@ -514,7 +524,7 @@ jobs:
       - name: Upload 3.3.3 desktop installer
         uses: actions/upload-artifact@v4
         with:
-          name: Qimutang-3.3.3-MySQL-Commercial-Windows-Installer-Final-Operations
+          name: Qimutang-Store-System-3.3.3-R3-Windows-Installer
           path: |
             dist/*.exe
             dist/SHA256SUMS.txt

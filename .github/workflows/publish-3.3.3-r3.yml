@@ -1,0 +1,78 @@
+name: Publish Qimutang 3.3.3 R3 UI Release
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - "Build Qimutang 3.3.3 R3 Global UI"
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish-release:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve verified build run
+        id: build-run
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "workflow_run" ]; then
+            run_id="${{ github.event.workflow_run.id }}"
+          else
+            run_id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-windows-3.3.0-desktop-final.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].id')"
+          fi
+          test -n "$run_id"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+
+      - name: Download verified Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Qimutang-Store-System-3.3.3-R3-Windows-Installer
+          path: dist
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.build-run.outputs.run_id }}
+
+      - name: Verify release files
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/Qimutang-Store-System-3.3.3-R3-Windows-Installer.exe
+          test -f dist/SHA256SUMS.txt
+          test -f dist/SIGNING-STATUS.txt
+          (cd dist && sha256sum -c SHA256SUMS.txt)
+          test "$(stat -c%s dist/Qimutang-Store-System-3.3.3-R3-Windows-Installer.exe)" -gt 157286400
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v3.3.3-r3
+          name: 齐沐堂门店管理系统 3.3.3 R3
+          prerelease: true
+          make_latest: false
+          body: |
+            3.3.3 R3 全局UI优化版。
+
+            - 保留3.3.3完整项目目录、项目分类和护理产品功能。
+            - 全面升级侧栏、顶部栏、首页、表格、表单、弹窗和收银分类界面。
+            - 删除旧版营销展示字样，保留自定义系统名称和Logo。
+            - 使用独立客户端缓存目录，覆盖安装后不会回到旧UI。
+            - 客户端严格校验3.3.3后台版本，防止旧后台混用。
+            - 首次启动和数据升级最长等待8分钟，避免大型目录初始化被误判失败。
+            - Windows构建会执行静默安装、MySQL初始化、登录、目录种子、首页、收银和审计验收。
+
+            覆盖安装会继续使用现有QimutangData数据；安装前建议先备份。请同时查看SHA256SUMS.txt和SIGNING-STATUS.txt。
+          files: |
+            dist/Qimutang-Store-System-3.3.3-R3-Windows-Installer.exe
+            dist/SHA256SUMS.txt
+            dist/SIGNING-STATUS.txt
+          fail_on_unmatched_files: true
+          overwrite_files: true
