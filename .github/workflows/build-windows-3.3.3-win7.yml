@@ -162,9 +162,6 @@ jobs:
           WizardStyle=modern
           DisableProgramGroupPage=yes
           
-          [Languages]
-          Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
-          
           [Files]
           Source: "$env:STAGE_DIR\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
           Source: "$env:STAGE_DIR\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
