@@ -214,7 +214,7 @@ jobs:
             $login=Invoke-RestMethod 'http://127.0.0.1:18180/api/auth/login' -Method Post -ContentType 'application/json' -Body $body
             if(!$login.success){throw 'Admin login failed'}
             $headers=@{Authorization="Bearer $($login.data.token)"}
-            $catalog=Invoke-RestMethod 'http://127.0.0.1:18180/api/catalog' -Headers $headers
+            $catalog=Invoke-RestMethod 'http://127.0.0.1:18180/api/v23/catalog' -Headers $headers
             if(!$catalog.success -or $catalog.data.services.Count -lt 21 -or $catalog.data.products.Count -lt 16){throw 'Catalog regression'}
           } finally {
             if($process -and !$process.HasExited){Stop-Process $process.Id -Force}
