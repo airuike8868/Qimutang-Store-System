@@ -1,10 +1,10 @@
-name: Publish Qimutang 3.3.3 R3 UI Release
+name: Publish Qimutang 3.3.3 R4 UI Release
 
 on:
   workflow_dispatch:
   workflow_run:
     workflows:
-      - "Build Qimutang 3.3.3 R3 Global UI"
+      - "Build Qimutang 3.3.3 R4 UI"
     types:
       - completed
 
@@ -35,7 +35,7 @@ jobs:
       - name: Download verified Windows artifact
         uses: actions/download-artifact@v4
         with:
-          name: Qimutang-Store-System-3.3.3-R3-Windows-Installer
+          name: Qimutang-Store-System-3.3.3-R4-Windows-Installer
           path: dist
           github-token: ${{ github.token }}
           repository: ${{ github.repository }}
@@ -45,24 +45,25 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f dist/Qimutang-Store-System-3.3.3-R3-Windows-Installer.exe
+          test -f dist/Qimutang-Store-System-3.3.3-R4-Windows-Installer.exe
           test -f dist/SHA256SUMS.txt
           test -f dist/SIGNING-STATUS.txt
           (cd dist && sha256sum -c SHA256SUMS.txt)
-          test "$(stat -c%s dist/Qimutang-Store-System-3.3.3-R3-Windows-Installer.exe)" -gt 157286400
+          test "$(stat -c%s dist/Qimutang-Store-System-3.3.3-R4-Windows-Installer.exe)" -gt 157286400
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v3.3.3-r3
-          name: 齐沐堂门店管理系统 3.3.3 R3
+          tag_name: v3.3.3-r4
+          name: 齐沐堂门店管理系统 3.3.3 R4
           prerelease: true
           make_latest: false
           body: |
-            3.3.3 R3 全局UI优化版。
+            3.3.3 R4 界面修正版。
 
             - 保留3.3.3完整项目目录、项目分类和护理产品功能。
             - 全面升级侧栏、顶部栏、首页、表格、表单、弹窗和收银分类界面。
+            - 去掉顶部右侧“布局”按钮，并清理对应事件和样式。
             - 删除旧版营销展示字样，保留自定义系统名称和Logo。
             - 使用独立客户端缓存目录，覆盖安装后不会回到旧UI。
             - 客户端严格校验3.3.3后台版本，防止旧后台混用。
@@ -71,7 +72,7 @@ jobs:
 
             覆盖安装会继续使用现有QimutangData数据；安装前建议先备份。请同时查看SHA256SUMS.txt和SIGNING-STATUS.txt。
           files: |
-            dist/Qimutang-Store-System-3.3.3-R3-Windows-Installer.exe
+            dist/Qimutang-Store-System-3.3.3-R4-Windows-Installer.exe
             dist/SHA256SUMS.txt
             dist/SIGNING-STATUS.txt
           fail_on_unmatched_files: true
