@@ -1,0 +1,63 @@
+name: Publish Qimutang 3.3.3 Win7 Client Release
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows: ["Build Qimutang 3.3.3 Win7 Client"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+
+jobs:
+  publish:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve verified build
+        id: build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = workflow_run ]; then id="${{ github.event.workflow_run.id }}"; else id="$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/build-windows-3.3.3-win7-client.yml/runs?status=success&per_page=1" --jq '.workflow_runs[0].id')"; fi
+          test -n "$id"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: Qimutang-Store-System-3.3.3-Win7-Client-x64-Installer
+          path: dist
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ steps.build.outputs.id }}
+
+      - name: Verify files
+        run: |
+          test -f dist/Qimutang-Store-System-3.3.3-Win7-Client-x64-Installer.exe
+          (cd dist && sha256sum -c SHA256SUMS.txt)
+          test "$(stat -c%s dist/Qimutang-Store-System-3.3.3-Win7-Client-x64-Installer.exe)" -gt 104857600
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v3.3.3-win7-client
+          name: 齐沐堂门店管理系统 3.3.3 Win7客户端版
+          prerelease: true
+          make_latest: false
+          body: |
+            Windows 7 SP1 64位桌面客户端版。
+
+            - 使用 Win7 可运行的 Electron 22 内置 Chromium，不依赖 WebView2，不再弹出默认浏览器。
+            - 使用 Win7 兼容的 Liberica JRE 11.0.18+10 和 SQLite 单机数据库。
+            - 保留 3.3.3 R4 的完整业务页面、项目目录和全局 UI。
+            - 仅允许客户端加载本机 127.0.0.1 页面。
+            - 数据保存在 QimutangData，卸载不删除数据。
+
+            Electron 22 已停止安全更新；该版本只用于无法升级系统的旧电脑，请勿开放公网访问，并定期备份数据。
+          files: |
+            dist/Qimutang-Store-System-3.3.3-Win7-Client-x64-Installer.exe
+            dist/SHA256SUMS.txt
+            dist/SIGNING-STATUS.txt
+          fail_on_unmatched_files: true
+          overwrite_files: true

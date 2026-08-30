@@ -1,0 +1,142 @@
+name: Build Qimutang 3.3.3 Win7 Client
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "qimutang-win7-client-shell.zip"
+      - ".github/workflows/build-windows-3.3.3-win7-client.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-win7-client:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      OUTPUT_NAME: Qimutang-Store-System-3.3.3-Win7-Client-x64-Installer
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node 16
+        uses: actions/setup-node@v6
+        with:
+          node-version: "16"
+
+      - name: Download and install verified Win7 base
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference='Stop'
+          $baseInstaller=Join-Path $env:RUNNER_TEMP 'qimutang-win7-base.exe'
+          gh release download v3.3.3-win7 --repo $env:GITHUB_REPOSITORY --pattern 'Qimutang-Store-System-3.3.3-Win7-x64-Installer.exe' --output $baseInstaller --clobber
+          $base=Join-Path $env:RUNNER_TEMP 'qimutang-win7-base'
+          $p=Start-Process $baseInstaller -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$base") -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "Base install failed: $($p.ExitCode)"}
+          if(!(Test-Path "$base\app\qimutang.jar")){throw 'Base backend missing'}
+          if(!(Test-Path "$base\runtime\bin\java.exe")){throw 'Base Java runtime missing'}
+          "BASE_DIR=$base" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Package Win7 desktop client
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $shell=Join-Path $env:RUNNER_TEMP 'qimutang-client-shell'
+          Expand-Archive (Join-Path $env:GITHUB_WORKSPACE 'qimutang-win7-client-shell.zip') $shell -Force
+          Set-Location $shell
+          npm install --no-audit --no-fund
+          if($LASTEXITCODE -ne 0){throw 'npm install failed'}
+          $pack=Join-Path $env:RUNNER_TEMP 'qimutang-client-package'
+          npx electron-packager . 'QimutangStoreSystem' --platform=win32 --arch=x64 --electron-version=22.3.27 --out=$pack --overwrite --asar --icon="$env:BASE_DIR\qimutang.ico" --win32metadata.CompanyName='Qimutang' --win32metadata.ProductName='齐沐堂门店管理系统' --win32metadata.FileDescription='齐沐堂门店管理系统 Win7客户端版'
+          if($LASTEXITCODE -ne 0){throw 'Electron packaging failed'}
+          $client=Get-ChildItem $pack -Directory | Select-Object -First 1
+          if(!$client){throw 'Packaged client missing'}
+          New-Item -ItemType Directory -Force -Path "$($client.FullName)\resources\backend" | Out-Null
+          Copy-Item "$env:BASE_DIR\app\qimutang.jar" "$($client.FullName)\resources\backend\qimutang.jar" -Force
+          Copy-Item "$env:BASE_DIR\runtime" "$($client.FullName)\resources\runtime" -Recurse -Force
+          Copy-Item "$env:BASE_DIR\qimutang.ico" "$($client.FullName)\resources\qimutang.ico" -Force
+          "CLIENT_DIR=$($client.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build Win7 client installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          choco install innosetup --no-progress -y
+          $out=Join-Path $env:GITHUB_WORKSPACE 'dist'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $iss=Join-Path $env:RUNNER_TEMP 'qimutang-win7-client.iss'
+          $content=@"
+          [Setup]
+          AppId={{F3575108-1292-47DC-9F1D-3337A6B7C101}
+          AppName=齐沐堂门店管理系统 Win7客户端版
+          AppVersion=3.3.3
+          AppVerName=齐沐堂门店管理系统 3.3.3 Win7客户端版
+          DefaultDirName={autopf}\Qimutang Store System Win7 Client
+          DefaultGroupName=齐沐堂门店管理系统
+          OutputDir=$out
+          OutputBaseFilename=$env:OUTPUT_NAME
+          SetupIconFile=$env:BASE_DIR\qimutang.ico
+          UninstallDisplayIcon={app}\resources\qimutang.ico
+          Compression=lzma2
+          SolidCompression=no
+          ArchitecturesAllowed=x64compatible
+          ArchitecturesInstallIn64BitMode=x64compatible
+          MinVersion=6.1sp1
+          PrivilegesRequired=admin
+          CloseApplications=yes
+          RestartApplications=no
+          WizardStyle=modern
+          DisableProgramGroupPage=yes
+
+          [Files]
+          Source: "$env:CLIENT_DIR\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+          [Icons]
+          Name: "{autodesktop}\齐沐堂门店管理系统"; Filename: "{app}\QimutangStoreSystem.exe"; WorkingDir: "{app}"; IconFilename: "{app}\resources\qimutang.ico"
+          Name: "{group}\齐沐堂门店管理系统"; Filename: "{app}\QimutangStoreSystem.exe"; WorkingDir: "{app}"; IconFilename: "{app}\resources\qimutang.ico"
+
+          [Run]
+          Filename: "{app}\QimutangStoreSystem.exe"; WorkingDir: "{app}"; Description: "启动齐沐堂门店管理系统"; Flags: nowait postinstall skipifsilent
+
+          [UninstallDelete]
+          Type: filesandordirs; Name: "{app}"
+          "@
+          [IO.File]::WriteAllText($iss,$content,(New-Object Text.UTF8Encoding($true)))
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' $iss
+          if($LASTEXITCODE -ne 0){throw 'Inno Setup failed'}
+
+      - name: Install and smoke test desktop client
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:GITHUB_WORKSPACE "dist\$env:OUTPUT_NAME.exe"
+          $install=Join-Path $env:RUNNER_TEMP 'qimutang-win7-client-installed'
+          $p=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$install") -Wait -PassThru
+          if($p.ExitCode -ne 0){throw "Client install failed: $($p.ExitCode)"}
+          $exe=Join-Path $install 'QimutangStoreSystem.exe'
+          if(!(Test-Path $exe)){throw 'Client executable missing'}
+          $smoke=Start-Process $exe -ArgumentList '--smoke-test' -Wait -PassThru
+          if($smoke.ExitCode -ne 0){throw "Client smoke test failed: $($smoke.ExitCode)"}
+
+      - name: Scan and checksum
+        shell: powershell
+        run: |
+          $installer=Join-Path $env:GITHUB_WORKSPACE "dist\$env:OUTPUT_NAME.exe"
+          $defender="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(Test-Path $defender){& $defender -Scan -ScanType 3 -File $installer;if($LASTEXITCODE -gt 1){throw 'Defender scan failed'}}
+          $hash=(Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $env:OUTPUT_NAME.exe" | Out-File (Join-Path $env:GITHUB_WORKSPACE 'dist\SHA256SUMS.txt') -Encoding ascii
+          'Unsigned build; no Authenticode certificate configured.' | Out-File (Join-Path $env:GITHUB_WORKSPACE 'dist\SIGNING-STATUS.txt') -Encoding utf8
+
+      - name: Upload verified installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Qimutang-Store-System-3.3.3-Win7-Client-x64-Installer
+          path: |
+            dist/Qimutang-Store-System-3.3.3-Win7-Client-x64-Installer.exe
+            dist/SHA256SUMS.txt
+            dist/SIGNING-STATUS.txt
+          if-no-files-found: error
+          retention-days: 30
