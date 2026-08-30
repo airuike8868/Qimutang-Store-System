@@ -1,0 +1,239 @@
+name: Build Qimutang 3.3.3 Win7 Legacy
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "qimutang-3.3.3-desktop-source-r4-ui.zip"
+      - "win7-java11.patch"
+      - ".github/workflows/build-windows-3.3.3-win7.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-win7:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      SOURCE_ZIP: qimutang-3.3.3-desktop-source-r4-ui.zip
+      JRE_VERSION: 11.0.18+10
+      OUTPUT_NAME: Qimutang-Store-System-3.3.3-Win7-x64-Installer
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Java 11
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "11"
+
+      - name: Extract and verify source
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $zip=Join-Path $env:GITHUB_WORKSPACE $env:SOURCE_ZIP
+          if(!(Test-Path $zip)){throw "Missing $env:SOURCE_ZIP"}
+          $work=Join-Path $env:RUNNER_TEMP 'qimutang-win7-source'
+          if(Test-Path $work){Remove-Item $work -Recurse -Force}
+          Expand-Archive $zip $work -Force
+          $pom=Get-ChildItem $work -Filter pom.xml -Recurse -File | Select-Object -First 1
+          if(!$pom){throw 'pom.xml missing'}
+          $project=$pom.Directory.FullName
+          Set-Location $project
+          git apply --whitespace=nowarn (Join-Path $env:GITHUB_WORKSPACE 'win7-java11.patch')
+          if($LASTEXITCODE -ne 0){throw 'Win7 Java 11 patch failed'}
+          $win7Pom=@'
+          <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+            <modelVersion>4.0.0</modelVersion><parent><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-parent</artifactId><version>2.7.18</version></parent>
+            <groupId>com.qimutang</groupId><artifactId>qimutang-win7</artifactId><version>3.3.3-win7</version><properties><java.version>11</java.version><maven.compiler.release>11</maven.compiler.release></properties>
+            <dependencies>
+              <dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-web</artifactId></dependency><dependency><groupId>org.springframework.boot</groupId><artifactId>spring-boot-starter-jdbc</artifactId></dependency><dependency><groupId>org.springframework.security</groupId><artifactId>spring-security-crypto</artifactId></dependency>
+              <dependency><groupId>javax.annotation</groupId><artifactId>javax.annotation-api</artifactId><version>1.3.2</version></dependency><dependency><groupId>org.apache.poi</groupId><artifactId>poi-ooxml</artifactId><version>5.3.0</version></dependency><dependency><groupId>org.xerial</groupId><artifactId>sqlite-jdbc</artifactId><version>3.46.1.0</version></dependency>
+              <dependency><groupId>io.jsonwebtoken</groupId><artifactId>jjwt-api</artifactId><version>0.12.6</version></dependency><dependency><groupId>io.jsonwebtoken</groupId><artifactId>jjwt-impl</artifactId><version>0.12.6</version><scope>runtime</scope></dependency><dependency><groupId>io.jsonwebtoken</groupId><artifactId>jjwt-jackson</artifactId><version>0.12.6</version><scope>runtime</scope></dependency>
+            </dependencies><build><finalName>qimutang</finalName><plugins><plugin><groupId>org.springframework.boot</groupId><artifactId>spring-boot-maven-plugin</artifactId></plugin></plugins></build>
+          </project>
+          '@
+          [IO.File]::WriteAllText((Join-Path $project 'pom-win7.xml'),$win7Pom,(New-Object Text.UTF8Encoding($false)))
+          $index=Join-Path $project 'src\main\resources\static\index.html'
+          $indexText=[IO.File]::ReadAllText($index)
+          if($indexText -notmatch '3\.3\.3-r4-ui'){throw 'R4 UI cache key missing'}
+          if($indexText -match 'layout-toggle'){throw 'Removed layout button returned'}
+          "PROJECT_DIR=$project" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Verify UI and catalog
+        shell: powershell
+        run: |
+          Set-Location $env:PROJECT_DIR
+          node scripts/ui-structure-test.cjs
+          if($LASTEXITCODE -ne 0){throw 'UI test failed'}
+          node scripts/catalog-seed-test.cjs
+          if($LASTEXITCODE -ne 0){throw 'Catalog test failed'}
+
+      - name: Prepare Java 11 and Spring Boot 2.7 source
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $files=Get-ChildItem (Join-Path $env:PROJECT_DIR 'src\main\java') -Filter *.java -Recurse
+          $utf8=New-Object Text.UTF8Encoding($false)
+          foreach($file in $files){
+            $text=[IO.File]::ReadAllText($file.FullName)
+            $text=$text.Replace('jakarta.annotation.PostConstruct','javax.annotation.PostConstruct')
+            $text=$text.Replace('jakarta.servlet.http.HttpServletRequest','javax.servlet.http.HttpServletRequest')
+            [IO.File]::WriteAllText($file.FullName,$text,$utf8)
+          }
+          $bad=Select-String -Path ($files.FullName) -Pattern 'jakarta\.|(?<!Collectors)\.toList\(\)|HexFormat|private record|case\s+.+->'
+          if($bad){$bad | Format-Table | Out-String | Write-Host;throw 'Java 11 incompatible source remains'}
+
+      - name: Build Java 11 SQLite backend
+        shell: powershell
+        run: |
+          Set-Location $env:PROJECT_DIR
+          mvn -B -f pom-win7.xml -DskipTests clean package
+          if($LASTEXITCODE -ne 0){throw 'Maven build failed'}
+          if(!(Test-Path 'target\qimutang.jar')){throw 'Backend JAR missing'}
+
+      - name: Download Win7-supported Liberica JRE 11
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $encoded=$env:JRE_VERSION.Replace('+','%2B')
+          $url="https://download.bell-sw.com/java/$encoded/bellsoft-jre$encoded-windows-amd64.zip"
+          $zip=Join-Path $env:RUNNER_TEMP 'liberica-jre11-win7.zip'
+          curl.exe -L --fail --retry 5 --retry-delay 3 -o $zip $url
+          if($LASTEXITCODE -ne 0){throw 'Liberica download failed'}
+          $extract=Join-Path $env:RUNNER_TEMP 'liberica-jre11'
+          Expand-Archive $zip $extract -Force
+          $java=Get-ChildItem $extract -Filter javaw.exe -Recurse -File | Select-Object -First 1
+          if(!$java){throw 'javaw.exe missing'}
+          "JRE_ROOT=$($java.Directory.Parent.FullName)" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Stage Win7 application
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $stage=Join-Path $env:RUNNER_TEMP 'qimutang-win7-stage'
+          New-Item -ItemType Directory -Force -Path "$stage\app","$stage\runtime" | Out-Null
+          Copy-Item "$env:PROJECT_DIR\target\qimutang.jar" "$stage\app\qimutang.jar" -Force
+          Copy-Item "$env:JRE_ROOT\*" "$stage\runtime" -Recurse -Force
+          Copy-Item "$env:PROJECT_DIR\packaging\qimutang.ico" "$stage\qimutang.ico" -Force
+          @'
+          齐沐堂门店管理系统 3.3.3 Windows 7 兼容版
+          
+          适用 Windows 7 SP1 64位。本版不安装 WebView2 和 MySQL，使用默认浏览器与 SQLite。
+          数据位于 %USERPROFILE%\QimutangData\data，卸载不删除数据。请定期在系统内执行整包备份。
+          '@ | Out-File "$stage\Windows7使用说明.txt" -Encoding utf8
+          "STAGE_DIR=$stage" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Build Win7 installer
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          choco install innosetup --no-progress -y
+          $out=Join-Path $env:GITHUB_WORKSPACE 'dist'
+          New-Item -ItemType Directory -Force -Path $out | Out-Null
+          $iss=Join-Path $env:RUNNER_TEMP 'qimutang-win7.iss'
+          $content=@"
+          [Setup]
+          AppId={{F3575108-1292-47DC-9F1D-3337A6B70001}
+          AppName=齐沐堂门店管理系统 Win7兼容版
+          AppVersion=3.3.3
+          AppVerName=齐沐堂门店管理系统 3.3.3 Win7兼容版
+          DefaultDirName={autopf}\Qimutang Store System Win7
+          DefaultGroupName=齐沐堂门店管理系统
+          OutputDir=$out
+          OutputBaseFilename=$env:OUTPUT_NAME
+          SetupIconFile=$env:STAGE_DIR\qimutang.ico
+          UninstallDisplayIcon={app}\qimutang.ico
+          Compression=lzma2
+          SolidCompression=no
+          ArchitecturesAllowed=x64compatible
+          ArchitecturesInstallIn64BitMode=x64compatible
+          MinVersion=6.1sp1
+          PrivilegesRequired=admin
+          CloseApplications=yes
+          RestartApplications=no
+          WizardStyle=modern
+          DisableProgramGroupPage=yes
+          
+          [Languages]
+          Name: "chinesesimp"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+          
+          [Files]
+          Source: "$env:STAGE_DIR\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "$env:STAGE_DIR\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
+          Source: "$env:STAGE_DIR\qimutang.ico"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "$env:STAGE_DIR\Windows7使用说明.txt"; DestDir: "{app}"; Flags: ignoreversion
+          
+          [Icons]
+          Name: "{autodesktop}\齐沐堂门店管理系统"; Filename: "{app}\runtime\bin\javaw.exe"; Parameters: "-Dfile.encoding=UTF-8 -jar ""{app}\app\qimutang.jar"""; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
+          Name: "{group}\齐沐堂门店管理系统"; Filename: "{app}\runtime\bin\javaw.exe"; Parameters: "-Dfile.encoding=UTF-8 -jar ""{app}\app\qimutang.jar"""; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
+          Name: "{group}\Windows7使用说明"; Filename: "{app}\Windows7使用说明.txt"
+          
+          [Run]
+          Filename: "{app}\runtime\bin\javaw.exe"; Parameters: "-Dfile.encoding=UTF-8 -jar ""{app}\app\qimutang.jar"""; WorkingDir: "{app}"; Description: "启动齐沐堂门店管理系统"; Flags: nowait postinstall skipifsilent
+          
+          [UninstallDelete]
+          Type: filesandordirs; Name: "{app}"
+          "@
+          [IO.File]::WriteAllText($iss,$content,(New-Object Text.UTF8Encoding($true)))
+          $iscc='C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          & $iscc $iss
+          if($LASTEXITCODE -ne 0){throw 'Inno Setup failed'}
+
+      - name: Install and smoke test SQLite edition
+        shell: powershell
+        run: |
+          $ErrorActionPreference='Stop'
+          $installer=Join-Path $env:GITHUB_WORKSPACE "dist\$env:OUTPUT_NAME.exe"
+          $install=Join-Path $env:RUNNER_TEMP 'qimutang-win7-installed'
+          & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="$install"
+          if($LASTEXITCODE -ne 0){throw 'Silent install failed'}
+          $data=Join-Path $env:RUNNER_TEMP 'qimutang-win7-test-data'
+          New-Item -ItemType Directory -Force -Path $data | Out-Null
+          $log=Join-Path $data 'backend.log'
+          $java=Join-Path $install 'runtime\bin\java.exe'
+          $jar=Join-Path $install 'app\qimutang.jar'
+          $args=@('-Dfile.encoding=UTF-8','-Djava.awt.headless=true','-Dqimutang.desktop=true',"-Dqimutang.data-dir=$data",'-Dserver.port=18180','-jar',$jar)
+          $process=Start-Process $java -ArgumentList $args -PassThru -RedirectStandardOutput $log -RedirectStandardError "$data\backend-error.log"
+          try{
+            $health=$null
+            for($i=0;$i -lt 180;$i++){
+              try{$health=Invoke-RestMethod 'http://127.0.0.1:18180/api/health' -TimeoutSec 2;if($health.success){break}}catch{}
+              Start-Sleep -Seconds 1
+            }
+            if(!$health.success -or $health.data.version -ne '3.3.3' -or $health.data.database -ne 'sqlite'){
+              Get-Content $log -Tail 200 -ErrorAction SilentlyContinue
+              throw 'SQLite health check failed'
+            }
+            $body=@{username='admin';password='123456'}|ConvertTo-Json
+            $login=Invoke-RestMethod 'http://127.0.0.1:18180/api/auth/login' -Method Post -ContentType 'application/json' -Body $body
+            if(!$login.success){throw 'Admin login failed'}
+            $headers=@{Authorization="Bearer $($login.data.token)"}
+            $catalog=Invoke-RestMethod 'http://127.0.0.1:18180/api/catalog' -Headers $headers
+            if(!$catalog.success -or $catalog.data.services.Count -lt 21 -or $catalog.data.products.Count -lt 16){throw 'Catalog regression'}
+          } finally {
+            if($process -and !$process.HasExited){Stop-Process $process.Id -Force}
+          }
+
+      - name: Scan and checksum
+        shell: powershell
+        run: |
+          $installer=Join-Path $env:GITHUB_WORKSPACE "dist\$env:OUTPUT_NAME.exe"
+          $defender="$env:ProgramFiles\Windows Defender\MpCmdRun.exe"
+          if(Test-Path $defender){& $defender -Scan -ScanType 3 -File $installer;if($LASTEXITCODE -gt 1){throw 'Defender scan failed'}}
+          $hash=(Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  $env:OUTPUT_NAME.exe" | Out-File (Join-Path $env:GITHUB_WORKSPACE 'dist\SHA256SUMS.txt') -Encoding ascii
+          "Unsigned build; no Authenticode certificate configured." | Out-File (Join-Path $env:GITHUB_WORKSPACE 'dist\SIGNING-STATUS.txt') -Encoding utf8
+
+      - name: Upload verified Win7 installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Qimutang-Store-System-3.3.3-Win7-x64-Installer
+          path: |
+            dist/Qimutang-Store-System-3.3.3-Win7-x64-Installer.exe
+            dist/SHA256SUMS.txt
+            dist/SIGNING-STATUS.txt
+          if-no-files-found: error
+          retention-days: 30
