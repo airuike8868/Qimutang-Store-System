@@ -123,12 +123,12 @@ jobs:
           Copy-Item "$env:PROJECT_DIR\target\qimutang.jar" "$stage\app\qimutang.jar" -Force
           Copy-Item "$env:JRE_ROOT\*" "$stage\runtime" -Recurse -Force
           Copy-Item "$env:PROJECT_DIR\packaging\qimutang.ico" "$stage\qimutang.ico" -Force
-          @'
-          齐沐堂门店管理系统 3.3.3 Windows 7 兼容版
-          
-          适用 Windows 7 SP1 64位。本版不安装 WebView2 和 MySQL，使用默认浏览器与 SQLite。
-          数据位于 %USERPROFILE%\QimutangData\data，卸载不删除数据。请定期在系统内执行整包备份。
-          '@ | Out-File "$stage\Windows7使用说明.txt" -Encoding utf8
+          @(
+            '齐沐堂门店管理系统 3.3.3 Windows 7 兼容版',
+            '',
+            '适用 Windows 7 SP1 64位。本版不安装 WebView2 和 MySQL，使用默认浏览器与 SQLite。',
+            '数据位于 %USERPROFILE%\QimutangData\data，卸载不删除数据。请定期在系统内执行整包备份。'
+          ) | Out-File "$stage\Windows7使用说明.txt" -Encoding utf8
           "STAGE_DIR=$stage" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build Win7 installer
