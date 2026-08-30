@@ -42,7 +42,11 @@ jobs:
           if(!$pom){throw 'pom.xml missing'}
           $project=$pom.Directory.FullName
           Set-Location $project
-          git apply --whitespace=nowarn (Join-Path $env:GITHUB_WORKSPACE 'win7-java11.patch')
+          $patchSource=Join-Path $env:GITHUB_WORKSPACE 'win7-java11.patch'
+          $patchNormalized=Join-Path $env:RUNNER_TEMP 'win7-java11-lf.patch'
+          $patchText=[IO.File]::ReadAllText($patchSource).Replace("`r`n","`n")
+          [IO.File]::WriteAllText($patchNormalized,$patchText,(New-Object Text.UTF8Encoding($false)))
+          git apply --whitespace=nowarn $patchNormalized
           if($LASTEXITCODE -ne 0){throw 'Win7 Java 11 patch failed'}
           $win7Pom=@'
           <project xmlns="http://maven.apache.org/POM/4.0.0" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
