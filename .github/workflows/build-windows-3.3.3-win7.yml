@@ -85,6 +85,7 @@ jobs:
             $text=[IO.File]::ReadAllText($file.FullName)
             $text=$text.Replace('jakarta.annotation.PostConstruct','javax.annotation.PostConstruct')
             $text=$text.Replace('jakarta.servlet.http.HttpServletRequest','javax.servlet.http.HttpServletRequest')
+            $text=$text.Replace('jakarta.servlet.http.HttpServletResponse','javax.servlet.http.HttpServletResponse')
             [IO.File]::WriteAllText($file.FullName,$text,$utf8)
           }
           $bad=Select-String -Path ($files.FullName) -Pattern 'jakarta\.|(?<!Collectors)\.toList\(\)|HexFormat|private record|case\s+.+->'
