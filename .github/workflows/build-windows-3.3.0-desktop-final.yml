@@ -1,10 +1,10 @@
-name: Build Qimutang 3.3.3 R3 Global UI
+name: Build Qimutang 3.3.3 R4 UI
 
 on:
   workflow_dispatch:
   push:
     paths:
-      - "qimutang-3.3.3-desktop-source-r3-ui.zip"
+      - "qimutang-3.3.3-desktop-source-r4-ui.zip"
       - ".github/workflows/build-windows-3.3.0-desktop-final.yml"
 
 permissions:
@@ -18,7 +18,7 @@ jobs:
     env:
       APP_VERSION: "3.3.3"
       MYSQL_VERSION: "8.4.11"
-      SOURCE_ZIP: "qimutang-3.3.3-desktop-source-r3-ui.zip"
+      SOURCE_ZIP: "qimutang-3.3.3-desktop-source-r4-ui.zip"
 
     steps:
       - name: Checkout
@@ -72,14 +72,14 @@ jobs:
               $programText -notmatch 'EnsureMySqlReady' -or
               $programText -notmatch 'InstallRoot' -or
               $programText -notmatch 'ExpectedBackendVersion = "3\.3\.3"' -or
-              $programText -notmatch 'ClientBuild = "3\.3\.3-r3-ui"' -or
+              $programText -notmatch 'ClientBuild = "3\.3\.3-r4-ui"' -or
               $programText -notmatch 'JsonDocument\.Parse') {
             throw "Desktop MySQL bootstrap is incomplete"
           }
           $indexFile = Join-Path $projectDir 'src\main\resources\static\index.html'
           $indexText = Get-Content $indexFile -Raw
-          if ($indexText -notmatch 'v=3\.3\.3-r3-ui') {
-            throw "R3 global UI static resource cache key is missing"
+          if ($indexText -notmatch 'v=3\.3\.3-r4-ui') {
+            throw "R4 UI static resource cache key is missing"
           }
 
           "PROJECT_DIR=$projectDir" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
@@ -282,7 +282,7 @@ jobs:
           DefaultGroupName=$appName
           DisableProgramGroupPage=yes
           OutputDir=$output
-          OutputBaseFilename=Qimutang-Store-System-3.3.3-R3-Windows-Installer
+          OutputBaseFilename=Qimutang-Store-System-3.3.3-R4-Windows-Installer
           SetupIconFile=$stage\qimutang.ico
           UninstallDisplayIcon={app}\qimutang.ico
           Compression=lzma2/max
@@ -524,7 +524,7 @@ jobs:
       - name: Upload 3.3.3 desktop installer
         uses: actions/upload-artifact@v4
         with:
-          name: Qimutang-Store-System-3.3.3-R3-Windows-Installer
+          name: Qimutang-Store-System-3.3.3-R4-Windows-Installer
           path: |
             dist/*.exe
             dist/SHA256SUMS.txt
