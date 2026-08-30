@@ -1,0 +1,294 @@
+--- a/src/main/java/com/qimutang/V23Api.java
++++ b/src/main/java/com/qimutang/V23Api.java
+@@ -429,13 +429,16 @@
+             if (!approvedPriceChange) return fail("改价审批不存在、未通过或与服务单不匹配");
+         }
+         Object rawItems = body.get("items");
+-        if (!(rawItems instanceof List<?> itemList) || itemList.isEmpty()) return fail("请至少选择一个服务或护理产品");
++        if (!(rawItems instanceof List<?>)) return fail("请至少选择一个服务或护理产品");
++        List<?> itemList = (List<?>) rawItems;
++        if (itemList.isEmpty()) return fail("请至少选择一个服务或护理产品");
+         List<PreparedItem> items = new ArrayList<>();
+         BigDecimal total = BigDecimal.ZERO;
+         BigDecimal originalTotal = BigDecimal.ZERO;
+         String globalPriceReason = text(body.get("priceChangeReason"));
+         for (Object raw : itemList) {
+-            if (!(raw instanceof Map<?, ?> map)) return fail("订单项目格式不正确");
++            if (!(raw instanceof Map<?, ?>)) return fail("订单项目格式不正确");
++            Map<?, ?> map = (Map<?, ?>) raw;
+             PreparedItem item = prepareItem(map, customerId != null, globalPriceReason, approvedPriceChange, request);
+             items.add(item);
+             total = total.add(item.lineTotal());
+@@ -567,12 +570,15 @@
+     }
+ 
+     private List<PaymentInput> parsePayments(Object rawPayments, Long customerId) {
+-        if (!(rawPayments instanceof List<?> list) || list.isEmpty()) {
++        if (!(rawPayments instanceof List<?>)) {
+             throw new IllegalArgumentException("请选择付款方式");
+         }
++        List<?> list = (List<?>) rawPayments;
++        if (list.isEmpty()) throw new IllegalArgumentException("请选择付款方式");
+         List<PaymentInput> result = new ArrayList<>();
+         for (Object raw : list) {
+-            if (!(raw instanceof Map<?, ?> map)) throw new IllegalArgumentException("付款明细格式不正确");
++            if (!(raw instanceof Map<?, ?>)) throw new IllegalArgumentException("付款明细格式不正确");
++            Map<?, ?> map = (Map<?, ?>) raw;
+             String method = text(map.get("method"));
+             BigDecimal amount = decimal(map.get("amount"), "付款金额");
+             if (!enabledPaymentMethods().contains(method)) throw new IllegalArgumentException("付款方式未启用或不正确");
+@@ -689,7 +695,9 @@
+         String reason = text(body.get("reason"));
+         if (reason.length() < 2) return fail("请填写退款原因");
+         Object rawSelections = body.get("items");
+-        if (!(rawSelections instanceof List<?> selections) || selections.isEmpty()) return fail("请选择要退款的项目或产品");
++        if (!(rawSelections instanceof List<?>)) return fail("请选择要退款的项目或产品");
++        List<?> selections = (List<?>) rawSelections;
++        if (selections.isEmpty()) return fail("请选择要退款的项目或产品");
+         Map<String, Object> order;
+         try {
+             order = db.queryForMap("select * from orders where id=? and deleted=0", id);
+@@ -709,7 +717,8 @@
+         List<RefundLine> lines = new ArrayList<>();
+         BigDecimal total = BigDecimal.ZERO;
+         for (Object raw : selections) {
+-            if (!(raw instanceof Map<?, ?> map)) return fail("退款明细格式不正确");
++            if (!(raw instanceof Map<?, ?>)) return fail("退款明细格式不正确");
++            Map<?, ?> map = (Map<?, ?>) raw;
+             long orderItemId = Long.parseLong(text(map.get("orderItemId")));
+             Map<String, Object> item;
+             try {
+@@ -952,16 +961,17 @@
+     }
+ 
+     private void addMethod(Map<String, BigDecimal> values, String method, BigDecimal amount) {
+-        String key = switch (method) {
+-            case "现金" -> "cash";
+-            case "微信" -> "wechat";
+-            case "支付宝" -> "alipay";
+-            case "银行卡" -> "card";
+-            case "美团" -> "meituan";
+-            case "抖音" -> "douyin";
+-            case "会员余额" -> null;
+-            default -> "other";
+-        };
++        String key;
++        switch (method) {
++            case "现金": key = "cash"; break;
++            case "微信": key = "wechat"; break;
++            case "支付宝": key = "alipay"; break;
++            case "银行卡": key = "card"; break;
++            case "美团": key = "meituan"; break;
++            case "抖音": key = "douyin"; break;
++            case "会员余额": key = null; break;
++            default: key = "other";
++        }
+         if (key != null) values.put(key, values.get(key).add(amount));
+     }
+ 
+@@ -1197,17 +1207,34 @@
+         return ok(result);
+     }
+ 
+-    private record PreparedItem(String type, long sourceId, String name, String category,
+-                                BigDecimal quantity, BigDecimal originalUnitPrice, BigDecimal unitPrice,
+-                                BigDecimal lineTotal, BigDecimal costPrice, Long employeeId,
+-                                String employeeName, BigDecimal commission, BigDecimal commissionRate,
+-                                String priceReason) {
+-    }
+-
+-    private record PaymentInput(String method, BigDecimal amount) {
+-    }
+-
+-    private record RefundLine(Map<String, Object> item, BigDecimal quantity,
+-                              BigDecimal amount, boolean restock) {
++    private static final class PreparedItem {
++        private final String type; private final long sourceId; private final String name; private final String category;
++        private final BigDecimal quantity; private final BigDecimal originalUnitPrice; private final BigDecimal unitPrice;
++        private final BigDecimal lineTotal; private final BigDecimal costPrice; private final Long employeeId;
++        private final String employeeName; private final BigDecimal commission; private final BigDecimal commissionRate;
++        private final String priceReason;
++        PreparedItem(String type,long sourceId,String name,String category,BigDecimal quantity,BigDecimal originalUnitPrice,
++                     BigDecimal unitPrice,BigDecimal lineTotal,BigDecimal costPrice,Long employeeId,String employeeName,
++                     BigDecimal commission,BigDecimal commissionRate,String priceReason){this.type=type;this.sourceId=sourceId;this.name=name;
++            this.category=category;this.quantity=quantity;this.originalUnitPrice=originalUnitPrice;this.unitPrice=unitPrice;
++            this.lineTotal=lineTotal;this.costPrice=costPrice;this.employeeId=employeeId;this.employeeName=employeeName;
++            this.commission=commission;this.commissionRate=commissionRate;this.priceReason=priceReason;}
++        String type(){return type;} long sourceId(){return sourceId;} String name(){return name;} String category(){return category;}
++        BigDecimal quantity(){return quantity;} BigDecimal originalUnitPrice(){return originalUnitPrice;} BigDecimal unitPrice(){return unitPrice;}
++        BigDecimal lineTotal(){return lineTotal;} BigDecimal costPrice(){return costPrice;} Long employeeId(){return employeeId;}
++        String employeeName(){return employeeName;} BigDecimal commission(){return commission;} BigDecimal commissionRate(){return commissionRate;}
++        String priceReason(){return priceReason;}
++    }
++
++    private static final class PaymentInput {
++        private final String method; private final BigDecimal amount;
++        PaymentInput(String method,BigDecimal amount){this.method=method;this.amount=amount;}
++        String method(){return method;} BigDecimal amount(){return amount;}
++    }
++
++    private static final class RefundLine {
++        private final Map<String,Object> item; private final BigDecimal quantity; private final BigDecimal amount; private final boolean restock;
++        RefundLine(Map<String,Object> item,BigDecimal quantity,BigDecimal amount,boolean restock){this.item=item;this.quantity=quantity;this.amount=amount;this.restock=restock;}
++        Map<String,Object> item(){return item;} BigDecimal quantity(){return quantity;} BigDecimal amount(){return amount;} boolean restock(){return restock;}
+     }
+ }
+--- a/src/main/java/com/qimutang/V32Api.java
++++ b/src/main/java/com/qimutang/V32Api.java
+@@ -80,7 +80,7 @@
+     @PostMapping("/tickets")
+     Object createTicket(@RequestBody Map<String,Object> body,HttpServletRequest request) {
+         require(request,"管理员","店长","前台");
+-        if (!(body.get("items") instanceof List<?> items) || items.isEmpty()) return fail("请至少选择一个服务项目");
++        Object rawItems=body.get("items");if(!(rawItems instanceof List<?>))return fail("请至少选择一个服务项目");List<?> items=(List<?>)rawItems;if(items.isEmpty())return fail("请至少选择一个服务项目");
+         Long customer=id(body.get("customerId")), employee=id(body.get("employeeId")), workstation=id(body.get("workstationId"));
+         long ticketId=insertTicket(null,customer,employee,workstation,items,text(body.get("remark")),uid(request));
+         log(request,"服务开单","新建服务单ID "+ticketId); return ok(Map.of("ticketId",ticketId,"message","服务单已创建，可先服务后结账"));
+--- a/src/main/java/com/qimutang/V33Api.java
++++ b/src/main/java/com/qimutang/V33Api.java
+@@ -79,7 +79,7 @@
+     @PutMapping("/settings/{group}")
+     Object saveSettings(@PathVariable String group,@RequestBody Map<String,Object>body,HttpServletRequest r){
+         require(r,"管理员","店长");if("店长".equals(role(r))&&!MANAGER_SETTING_GROUPS.contains(group))return fail("此设置仅管理员可以修改");List<String>keys=GROUPS.get(group);if(keys==null)return fail("设置分组不存在");
+-        Object raw=body.get("values");if(!(raw instanceof Map<?,?>values))return fail("设置内容格式不正确");String reason=text(body.get("reason"));if(reason.length()<2)return fail("请填写修改原因");
++        Object raw=body.get("values");if(!(raw instanceof Map<?,?>))return fail("设置内容格式不正确");Map<?,?> values=(Map<?,?>)raw;String reason=text(body.get("reason"));if(reason.length()<2)return fail("请填写修改原因");
+         for(String key:keys){if(!values.containsKey(key))continue;String value=validateSetting(key,text(values.get(key)));settings.update(key,value,key,reason,uid(r));}
+         log(r,"系统设置","修改"+group+"设置；原因："+reason);return ok("设置已保存；新规则只用于之后产生的业务数据");
+     }
+@@ -115,7 +115,7 @@
+ 
+     @PutMapping("/services/{serviceId}/consumables")
+     @Transactional
+-    Object saveServiceConsumables(@PathVariable long serviceId,@RequestBody Map<String,Object>body,HttpServletRequest r){require(r,"管理员","店长");if(db.queryForObject("select count(*) from services where id=? and deleted=0",Integer.class,serviceId)==0)return fail("服务项目不存在");Object raw=body.get("items");if(!(raw instanceof List<?>items))return fail("耗材配置格式不正确");String n=now();db.update("update service_consumables set deleted=1,updated_at=? where service_id=? and deleted=0",n,serviceId);Set<Long>seen=new HashSet<>();for(Object value:items){if(!(value instanceof Map<?,?>item))continue;long inventoryId=Long.parseLong(text(item.get("inventoryId")));if(!seen.add(inventoryId))return fail("同一耗材不能重复配置");BigDecimal quantity=money(item.get("quantity"));if(quantity.signum()<=0)return fail("单次耗材数量必须大于0");if(db.queryForObject("select count(*) from inventory where id=? and deleted=0",Integer.class,inventoryId)==0)return fail("耗材商品不存在");db.update("insert into service_consumables(service_id,inventory_id,quantity,enabled,created_at,updated_at,deleted) values(?,?,?,1,?,?,0)",serviceId,inventoryId,quantity,n,n);}log(r,"服务耗材","更新服务ID "+serviceId+"的自动耗材配置");return ok("服务耗材规则已保存，之后结账将按规则自动扣减");}
++    Object saveServiceConsumables(@PathVariable long serviceId,@RequestBody Map<String,Object>body,HttpServletRequest r){require(r,"管理员","店长");if(db.queryForObject("select count(*) from services where id=? and deleted=0",Integer.class,serviceId)==0)return fail("服务项目不存在");Object raw=body.get("items");if(!(raw instanceof List<?>))return fail("耗材配置格式不正确");List<?> items=(List<?>)raw;String n=now();db.update("update service_consumables set deleted=1,updated_at=? where service_id=? and deleted=0",n,serviceId);Set<Long>seen=new HashSet<>();for(Object value:items){if(!(value instanceof Map<?,?>))continue;Map<?,?> item=(Map<?,?>)value;long inventoryId=Long.parseLong(text(item.get("inventoryId")));if(!seen.add(inventoryId))return fail("同一耗材不能重复配置");BigDecimal quantity=money(item.get("quantity"));if(quantity.signum()<=0)return fail("单次耗材数量必须大于0");if(db.queryForObject("select count(*) from inventory where id=? and deleted=0",Integer.class,inventoryId)==0)return fail("耗材商品不存在");db.update("insert into service_consumables(service_id,inventory_id,quantity,enabled,created_at,updated_at,deleted) values(?,?,?,1,?,?,0)",serviceId,inventoryId,quantity,n,n);}log(r,"服务耗材","更新服务ID "+serviceId+"的自动耗材配置");return ok("服务耗材规则已保存，之后结账将按规则自动扣减");}
+ 
+     @PostMapping("/privacy/requests")
+     Object privacyRequest(@RequestBody Map<String,Object>body,HttpServletRequest r){require(r,"管理员","店长","前台");long customerId=Long.parseLong(text(body.get("customerId")));String type=text(body.get("requestType"));if(!List.of("删除护理照片","导出个人资料","撤回隐私同意").contains(type))return fail("隐私申请类型不正确");String reason=text(body.get("reason"));if(reason.length()<2)return fail("请填写申请原因");String n=now();db.update("insert into privacy_requests(customer_id,request_type,scope,reason,status,requested_by,created_at,updated_at,deleted) values(?,?,?,?,'待审批',?,?,?,0)",customerId,type,text(body.get("scope")),reason,uid(r),n,n);log(r,"隐私申请",type+"，顾客ID "+customerId);return ok("隐私申请已提交，完成审批前不会删除原始资料");}
+@@ -163,7 +163,7 @@
+         return value;
+     }
+ 
+-    private Map<String,Object>verifyBackupFile(Path file)throws Exception{MessageDigest digest=MessageDigest.getInstance("SHA-256");try(var in=new BufferedInputStream(Files.newInputStream(file))){byte[]buf=new byte[1024*1024];int n;while((n=in.read(buf))>0)digest.update(buf,0,n);}String hash=HexFormat.of().formatHex(digest.digest());String status="通过",detail="文件可读取";if(file.getFileName().toString().endsWith(".zip")){try(ZipFile zip=new ZipFile(file.toFile(),StandardCharsets.UTF_8)){boolean hasDb=zip.getEntry("mysql-data.jsonl")!=null||zip.getEntry("qimutang.db")!=null;if(!hasDb){status="失败";detail="备份包缺少数据库数据";}else{var entries=zip.entries();while(entries.hasMoreElements()){ZipEntry e=entries.nextElement();try(var in=zip.getInputStream(e)){in.transferTo(new ByteArrayOutputStream());}}detail="压缩结构和数据库入口完整，共"+zip.size()+"个文件";}}catch(Exception e){status="失败";detail="压缩包损坏："+e.getMessage();}}return Map.of("status",status,"detail",detail,"sha256",hash,"size",Files.size(file));}
++    private Map<String,Object>verifyBackupFile(Path file)throws Exception{MessageDigest digest=MessageDigest.getInstance("SHA-256");try(var in=new BufferedInputStream(Files.newInputStream(file))){byte[]buf=new byte[1024*1024];int n;while((n=in.read(buf))>0)digest.update(buf,0,n);}StringBuilder hashBuilder=new StringBuilder();for(byte value:digest.digest())hashBuilder.append(String.format("%02x",value&0xff));String hash=hashBuilder.toString();String status="通过",detail="文件可读取";if(file.getFileName().toString().endsWith(".zip")){try(ZipFile zip=new ZipFile(file.toFile(),StandardCharsets.UTF_8)){boolean hasDb=zip.getEntry("mysql-data.jsonl")!=null||zip.getEntry("qimutang.db")!=null;if(!hasDb){status="失败";detail="备份包缺少数据库数据";}else{var entries=zip.entries();while(entries.hasMoreElements()){ZipEntry e=entries.nextElement();try(var in=zip.getInputStream(e)){in.transferTo(new ByteArrayOutputStream());}}detail="压缩结构和数据库入口完整，共"+zip.size()+"个文件";}}catch(Exception e){status="失败";detail="压缩包损坏："+e.getMessage();}}return Map.of("status",status,"detail",detail,"sha256",hash,"size",Files.size(file));}
+     private void addText(ZipOutputStream zip,String name,String value)throws Exception{zip.putNextEntry(new ZipEntry(name));zip.write(value.getBytes(StandardCharsets.UTF_8));zip.closeEntry();}
+     private void addLog(ZipOutputStream zip,Path file,String name)throws Exception{if(!Files.isRegularFile(file))return;byte[]bytes=Files.readAllBytes(file);if(bytes.length>1024*1024)bytes=Arrays.copyOfRange(bytes,bytes.length-1024*1024,bytes.length);String text=new String(bytes,StandardCharsets.UTF_8).replaceAll("(?<!\\d)(1\\d{2})\\d{4}(\\d{4})(?!\\d)","$1****$2").replaceAll("(?i)(password|pwd|secret|token)([=: ]+)[^\\s,;]+","$1$2***");addText(zip,name,text);}
+ }
+--- a/src/main/java/com/qimutang/V33ImportApi.java
++++ b/src/main/java/com/qimutang/V33ImportApi.java
+@@ -41,15 +41,15 @@
+     @PostMapping("/commit")
+     @Transactional
+     Object commit(@RequestBody Map<String,Object>body,HttpServletRequest r)throws Exception{
+-        require(r);String type=text(body.get("type")).toLowerCase(Locale.ROOT);if(!List.of("customers","services","inventory").contains(type))return fail("导入类型不正确");Object raw=body.get("rows");if(!(raw instanceof List<?>rows)||rows.isEmpty())return fail("没有可导入的数据");if(rows.size()>5000)return fail("单次最多导入5000行");int success=0,failed=0;List<String>errors=new ArrayList<>();String n=LocalDateTime.now().toString();
++        require(r);String type=text(body.get("type")).toLowerCase(Locale.ROOT);if(!List.of("customers","services","inventory").contains(type))return fail("导入类型不正确");Object raw=body.get("rows");if(!(raw instanceof List<?>))return fail("没有可导入的数据");List<?> rows=(List<?>)raw;if(rows.isEmpty())return fail("没有可导入的数据");if(rows.size()>5000)return fail("单次最多导入5000行");int success=0,failed=0;List<String>errors=new ArrayList<>();String n=LocalDateTime.now().toString();
+         for(int i=0;i<rows.size();i++){
+             Object item=rows.get(i);Map<?,?>values=null;
+-            if(item instanceof Map<?,?>itemMap){Object nested=itemMap.get("values");values=nested instanceof Map<?,?>nestedMap?nestedMap:itemMap;}
++            if(item instanceof Map<?,?>){Map<?,?> itemMap=(Map<?,?>)item;Object nested=itemMap.get("values");values=nested instanceof Map<?,?>?(Map<?,?>)nested:itemMap;}
+             if(values==null){failed++;errors.add("第"+(i+2)+"行格式不正确");continue;}Map<String,String>row=new LinkedHashMap<>();values.forEach((k,v)->row.put(text(k),text(v)));List<String>problems=validate(type,row);if(!problems.isEmpty()){failed++;errors.add("第"+(i+2)+"行："+String.join("、",problems));continue;}
+             try{if("customers".equals(type))insertCustomer(row,n);else if("services".equals(type))insertService(row,n);else insertInventory(row,n);success++;}catch(Exception e){failed++;errors.add("第"+(i+2)+"行：数据重复或格式不正确");}
+         }
+         db.update("insert into import_jobs(import_type,file_name,total_rows,success_rows,failed_rows,error_json,status,operator_id,created_at,updated_at,deleted) values(?,?,?,?,?,?,?, ?,?,?,0)",type,text(body.get("fileName")),rows.size(),success,failed,String.join("\n",errors),failed==0?"全部成功":"部分成功",uid(r),n,n);
+-        db.update("insert into audit_logs(user_id,type,content,ip,created_at,updated_at) values(?,?,?,?,?,?)",uid(r),"数据导入",type+"：成功"+success+"行，失败"+failed+"行",r.getRemoteAddr(),n,n);return ok(Map.of("successRows",success,"failedRows",failed,"errors",errors.stream().limit(100).toList()));
++        db.update("insert into audit_logs(user_id,type,content,ip,created_at,updated_at) values(?,?,?,?,?,?)",uid(r),"数据导入",type+"：成功"+success+"行，失败"+failed+"行",r.getRemoteAddr(),n,n);return ok(Map.of("successRows",success,"failedRows",failed,"errors",errors.stream().limit(100).collect(java.util.stream.Collectors.toList())));
+     }
+ 
+     private List<Map<String,String>>parse(MultipartFile file)throws Exception{String name=Objects.toString(file.getOriginalFilename(),"").toLowerCase(Locale.ROOT);return name.endsWith(".csv")?parseCsv(file.getBytes()):parseXlsx(file.getBytes());}
+--- a/src/main/java/com/qimutang/BackupService.java
++++ b/src/main/java/com/qimutang/BackupService.java
+@@ -37,9 +37,9 @@
+  synchronized void backupOnceDaily() throws Exception {Path target=data.resolve("backup/qimutang_full_"+LocalDate.now()+".zip");if(Files.exists(target)){copyExternal(target);return;}if(DbCompat.isMySql(db))new MySqlLogicalBackup(db, data.resolve("uploads")).exportTo(target);else{Path file=data.resolve("qimutang.db");if(!Files.exists(file))return;fullBackup(target);}verifyZip(target);copyExternal(target);cleanupOldBackups();}
+  synchronized Path backupNow() throws Exception {String stamp=LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS"));if(DbCompat.isMySql(db)){Path target=data.resolve("backup/qimutang_mysql_"+stamp+".zip");new MySqlLogicalBackup(db, data.resolve("uploads")).exportTo(target);return target;}Path file=data.resolve("qimutang.db");if(!Files.exists(file))throw new IllegalArgumentException("数据库文件不存在");db.execute("PRAGMA wal_checkpoint(FULL)");Path target=data.resolve("backup/qimutang_"+stamp+".db");Files.copy(file,target,StandardCopyOption.COPY_ATTRIBUTES);return target;}
+  synchronized Path fullBackupNow() throws Exception {String stamp=LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd_HH-mm-ss-SSS"));Path target=data.resolve("backup/qimutang_full_"+stamp+".zip");if(DbCompat.isMySql(db))new MySqlLogicalBackup(db, data.resolve("uploads")).exportTo(target);else fullBackup(target);verifyZip(target);copyExternal(target);cleanupOldBackups();return target;}
+- private void fullBackup(Path target) throws Exception {Path file=data.resolve("qimutang.db");if(!Files.isRegularFile(file))throw new IllegalArgumentException("数据库文件不存在");db.execute("PRAGMA wal_checkpoint(FULL)");Path temp=target.resolveSibling(target.getFileName()+".part");Files.deleteIfExists(temp);try{try(ZipOutputStream zip=new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(temp,StandardOpenOption.CREATE_NEW)))){addZip(zip,file,"qimutang.db");Path uploads=data.resolve("uploads");if(Files.isDirectory(uploads)){try(var walk=Files.walk(uploads)){for(Path path:walk.filter(Files::isRegularFile).toList()){String entry="uploads/"+uploads.relativize(path).toString().replace('\\','/');addZip(zip,path,entry);}}}ZipEntry manifest=new ZipEntry("backup-info.txt");zip.putNextEntry(manifest);zip.write(("齐沐堂门店管理系统 3.3.3 整包备份\n生成时间："+LocalDateTime.now()+"\n包含：数据库、护理照片和凭证\n").getBytes(StandardCharsets.UTF_8));zip.closeEntry();}try{Files.move(temp,target,StandardCopyOption.ATOMIC_MOVE);}catch(AtomicMoveNotSupportedException ignored){Files.move(temp,target);}}finally{Files.deleteIfExists(temp);}}
++ private void fullBackup(Path target) throws Exception {Path file=data.resolve("qimutang.db");if(!Files.isRegularFile(file))throw new IllegalArgumentException("数据库文件不存在");db.execute("PRAGMA wal_checkpoint(FULL)");Path temp=target.resolveSibling(target.getFileName()+".part");Files.deleteIfExists(temp);try{try(ZipOutputStream zip=new ZipOutputStream(new BufferedOutputStream(Files.newOutputStream(temp,StandardOpenOption.CREATE_NEW)))){addZip(zip,file,"qimutang.db");Path uploads=data.resolve("uploads");if(Files.isDirectory(uploads)){try(var walk=Files.walk(uploads)){for(Path path:walk.filter(Files::isRegularFile).collect(java.util.stream.Collectors.toList())){String entry="uploads/"+uploads.relativize(path).toString().replace('\\','/');addZip(zip,path,entry);}}}ZipEntry manifest=new ZipEntry("backup-info.txt");zip.putNextEntry(manifest);zip.write(("齐沐堂门店管理系统 3.3.3 整包备份\n生成时间："+LocalDateTime.now()+"\n包含：数据库、护理照片和凭证\n").getBytes(StandardCharsets.UTF_8));zip.closeEntry();}try{Files.move(temp,target,StandardCopyOption.ATOMIC_MOVE);}catch(AtomicMoveNotSupportedException ignored){Files.move(temp,target);}}finally{Files.deleteIfExists(temp);}}
+  private void addZip(ZipOutputStream zip,Path source,String name)throws Exception{ZipEntry entry=new ZipEntry(name);entry.setTime(Files.getLastModifiedTime(source).toMillis());zip.putNextEntry(entry);Files.copy(source,zip);zip.closeEntry();}
+- private void cleanupOldBackups()throws Exception{int days=Math.max(7,settings.integer("backup_retention_days",90));Path cutoffMarker=data.resolve("backup");try(var files=Files.list(cutoffMarker)){for(Path path:files.filter(Files::isRegularFile).toList()){String name=path.getFileName().toString();if((name.endsWith(".db")||name.endsWith(".zip"))&&Files.getLastModifiedTime(path).toInstant().isBefore(java.time.Instant.now().minus(java.time.Duration.ofDays(days))))Files.deleteIfExists(path);}}}
++ private void cleanupOldBackups()throws Exception{int days=Math.max(7,settings.integer("backup_retention_days",90));Path cutoffMarker=data.resolve("backup");try(var files=Files.list(cutoffMarker)){for(Path path:files.filter(Files::isRegularFile).collect(java.util.stream.Collectors.toList())){String name=path.getFileName().toString();if((name.endsWith(".db")||name.endsWith(".zip"))&&Files.getLastModifiedTime(path).toInstant().isBefore(java.time.Instant.now().minus(java.time.Duration.ofDays(days))))Files.deleteIfExists(path);}}}
+  private void verifyZip(Path target)throws Exception{try(ZipFile zip=new ZipFile(target.toFile(),StandardCharsets.UTF_8)){if(!zip.entries().hasMoreElements())throw new IllegalArgumentException("备份包内容为空");}}
+  private void copyExternal(Path target)throws Exception{String configured=settings.get("backup_external_path","").trim();if(configured.isBlank())return;Path external=Paths.get(configured).toAbsolutePath().normalize();Files.createDirectories(external);if(!Files.isDirectory(external)||!Files.isWritable(external))throw new IllegalArgumentException("外部备份目录不可写："+external);Path copy=external.resolve(target.getFileName().toString());Files.copy(target,copy,StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.COPY_ATTRIBUTES);}
+  List<Map<String,Object>> list() throws Exception {List<Map<String,Object>>out=new ArrayList<>();try(var s=Files.list(data.resolve("backup"))){s.filter(p->p.getFileName().toString().endsWith(".db")||p.getFileName().toString().endsWith(".zip")).sorted(Comparator.reverseOrder()).forEach(p->{try{out.add(Map.of("name",p.getFileName().toString(),"size",Files.size(p),"modifiedAt",Files.getLastModifiedTime(p).toString(),"full",p.getFileName().toString().endsWith(".zip")));}catch(Exception ignored){}});}return out;}
+--- a/src/main/java/com/qimutang/SqliteToMysqlMigrationService.java
++++ b/src/main/java/com/qimutang/SqliteToMysqlMigrationService.java
+@@ -50,7 +50,7 @@
+                 if (!safeName(table) || !targetTableExists(table)) continue;
+                 List<String> sourceColumns = sourceColumns(src, table);
+                 Set<String> targetColumns = targetColumns(table);
+-                List<String> columns = sourceColumns.stream().filter(targetColumns::contains).toList();
++                List<String> columns = sourceColumns.stream().filter(targetColumns::contains).collect(java.util.stream.Collectors.toList());
+                 if (columns.isEmpty()) continue;
+ 
+                 int read = 0, inserted = 0;
+--- a/src/main/java/com/qimutang/QimutangApplication.java
++++ b/src/main/java/com/qimutang/QimutangApplication.java
+@@ -308,7 +308,7 @@
+             Path liveUploads = dataDir.resolve("uploads").normalize();
+             if (Files.isDirectory(restoredUploads)) {
+                 try (var walk = Files.walk(restoredUploads)) {
+-                    for (Path path : walk.sorted().toList()) {
++                    for (Path path : walk.sorted().collect(java.util.stream.Collectors.toList())) {
+                         Path relative = restoredUploads.relativize(path);
+                         Path target = liveUploads.resolve(relative).normalize();
+                         if (!target.startsWith(liveUploads)) throw new IOException("备份包包含不安全的附件路径");
+@@ -324,7 +324,7 @@
+         } finally {
+             if (Files.exists(stage)) {
+                 try (var walk = Files.walk(stage)) {
+-                    for (Path path : walk.sorted(Comparator.reverseOrder()).toList()) {
++                    for (Path path : walk.sorted(Comparator.reverseOrder()).collect(java.util.stream.Collectors.toList())) {
+                         Files.deleteIfExists(path);
+                     }
+                 }
+--- a/src/main/java/com/qimutang/MySqlLogicalBackup.java
++++ b/src/main/java/com/qimutang/MySqlLogicalBackup.java
+@@ -38,7 +38,7 @@
+             zip.closeEntry();
+             if (uploads != null && Files.isDirectory(uploads)) {
+                 try (var walk = Files.walk(uploads)) {
+-                    for (Path file : walk.filter(Files::isRegularFile).toList()) {
++                    for (Path file : walk.filter(Files::isRegularFile).collect(java.util.stream.Collectors.toList())) {
+                         String name = "uploads/" + uploads.relativize(file).toString().replace('\\','/');
+                         zip.putNextEntry(new ZipEntry(name));
+                         Files.copy(file, zip);
+@@ -100,7 +100,7 @@
+         Path parent = uploads.getParent();
+         if (parent == null) return null;
+         Path temp = parent.resolve("uploads.restore.tmp");
+-        if (Files.exists(temp)) try (var walk=Files.walk(temp)) { for (Path x:walk.sorted(Comparator.reverseOrder()).toList()) Files.deleteIfExists(x); }
++        if (Files.exists(temp)) try (var walk=Files.walk(temp)) { for (Path x:walk.sorted(Comparator.reverseOrder()).collect(java.util.stream.Collectors.toList())) Files.deleteIfExists(x); }
+         Files.createDirectories(temp);
+         boolean found=false;
+         try (ZipInputStream zip = new ZipInputStream(new BufferedInputStream(Files.newInputStream(source)))) {
+@@ -112,17 +112,17 @@
+                 Files.createDirectories(out.getParent()); Files.copy(zip,out,StandardCopyOption.REPLACE_EXISTING); found=true;
+             }
+         }
+-        if (!found) { try(var walk=Files.walk(temp)){for(Path x:walk.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(x);} return null; }
++        if (!found) { try(var walk=Files.walk(temp)){for(Path x:walk.sorted(Comparator.reverseOrder()).collect(java.util.stream.Collectors.toList()))Files.deleteIfExists(x);} return null; }
+         return temp;
+     }
+ 
+     private void commitStagedUploads(Path temp) throws Exception {
+         Path parent = uploads.getParent();
+         Path old=parent.resolve("uploads.restore.old");
+-        if(Files.exists(old))try(var walk=Files.walk(old)){for(Path x:walk.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(x);}
++        if(Files.exists(old))try(var walk=Files.walk(old)){for(Path x:walk.sorted(Comparator.reverseOrder()).collect(java.util.stream.Collectors.toList()))Files.deleteIfExists(x);}
+         if(Files.exists(uploads))Files.move(uploads,old,StandardCopyOption.REPLACE_EXISTING);
+         Files.move(temp,uploads,StandardCopyOption.REPLACE_EXISTING);
+-        if(Files.exists(old))try(var walk=Files.walk(old)){for(Path x:walk.sorted(Comparator.reverseOrder()).toList())Files.deleteIfExists(x);}
++        if(Files.exists(old))try(var walk=Files.walk(old)){for(Path x:walk.sorted(Comparator.reverseOrder()).collect(java.util.stream.Collectors.toList()))Files.deleteIfExists(x);}
+     }
+ 
+     private List<String> tables() throws Exception {
+--- a/src/main/java/com/qimutang/V33Services.java
++++ b/src/main/java/com/qimutang/V33Services.java
+@@ -162,7 +162,8 @@
+         }
+     }
+     private LocalDate safeDate(String value, LocalDate fallback){try{return LocalDate.parse(value);}catch(Exception ignored){return fallback;}}
+-    static String sha256(byte[] bytes){try{return java.util.HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));}catch(Exception e){throw new IllegalStateException(e);}}
++    static String sha256(byte[] bytes){try{return hex(MessageDigest.getInstance("SHA-256").digest(bytes));}catch(Exception e){throw new IllegalStateException(e);}}
++    private static String hex(byte[] bytes){StringBuilder out=new StringBuilder(bytes.length*2);for(byte value:bytes)out.append(String.format("%02x",value&0xff));return out.toString();}
+ }
+ 
+ @Service
