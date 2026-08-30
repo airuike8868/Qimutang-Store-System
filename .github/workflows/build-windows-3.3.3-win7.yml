@@ -124,11 +124,11 @@ jobs:
           Copy-Item "$env:JRE_ROOT\*" "$stage\runtime" -Recurse -Force
           Copy-Item "$env:PROJECT_DIR\packaging\qimutang.ico" "$stage\qimutang.ico" -Force
           @(
-            '齐沐堂门店管理系统 3.3.3 Windows 7 兼容版',
+            'Qimutang Store System 3.3.3 - Windows 7 x64 edition',
             '',
-            '适用 Windows 7 SP1 64位。本版不安装 WebView2 和 MySQL，使用默认浏览器与 SQLite。',
-            '数据位于 %USERPROFILE%\QimutangData\data，卸载不删除数据。请定期在系统内执行整包备份。'
-          ) | Out-File "$stage\Windows7使用说明.txt" -Encoding utf8
+            'Requires Windows 7 SP1 64-bit. Uses the default browser and SQLite; WebView2 and MySQL are not installed.',
+            'Business data is stored under %USERPROFILE%\QimutangData\data and is not removed during uninstall.'
+          ) | Out-File "$stage\WIN7-README.txt" -Encoding ascii
           "STAGE_DIR=$stage" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build Win7 installer
@@ -169,12 +169,12 @@ jobs:
           Source: "$env:STAGE_DIR\app\*"; DestDir: "{app}\app"; Flags: ignoreversion recursesubdirs createallsubdirs
           Source: "$env:STAGE_DIR\runtime\*"; DestDir: "{app}\runtime"; Flags: ignoreversion recursesubdirs createallsubdirs
           Source: "$env:STAGE_DIR\qimutang.ico"; DestDir: "{app}"; Flags: ignoreversion
-          Source: "$env:STAGE_DIR\Windows7使用说明.txt"; DestDir: "{app}"; Flags: ignoreversion
+          Source: "$env:STAGE_DIR\WIN7-README.txt"; DestDir: "{app}"; Flags: ignoreversion
           
           [Icons]
           Name: "{autodesktop}\齐沐堂门店管理系统"; Filename: "{app}\runtime\bin\javaw.exe"; Parameters: "-Dfile.encoding=UTF-8 -jar ""{app}\app\qimutang.jar"""; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
           Name: "{group}\齐沐堂门店管理系统"; Filename: "{app}\runtime\bin\javaw.exe"; Parameters: "-Dfile.encoding=UTF-8 -jar ""{app}\app\qimutang.jar"""; WorkingDir: "{app}"; IconFilename: "{app}\qimutang.ico"
-          Name: "{group}\Windows7使用说明"; Filename: "{app}\Windows7使用说明.txt"
+          Name: "{group}\Windows 7 README"; Filename: "{app}\WIN7-README.txt"
           
           [Run]
           Filename: "{app}\runtime\bin\javaw.exe"; Parameters: "-Dfile.encoding=UTF-8 -jar ""{app}\app\qimutang.jar"""; WorkingDir: "{app}"; Description: "启动齐沐堂门店管理系统"; Flags: nowait postinstall skipifsilent
