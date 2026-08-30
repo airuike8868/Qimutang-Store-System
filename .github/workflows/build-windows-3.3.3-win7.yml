@@ -190,8 +190,9 @@ jobs:
           $ErrorActionPreference='Stop'
           $installer=Join-Path $env:GITHUB_WORKSPACE "dist\$env:OUTPUT_NAME.exe"
           $install=Join-Path $env:RUNNER_TEMP 'qimutang-win7-installed'
-          & $installer /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /DIR="$install"
-          if($LASTEXITCODE -ne 0){throw 'Silent install failed'}
+          $installLog=Join-Path $env:RUNNER_TEMP 'qimutang-win7-install.log'
+          $setup=Start-Process $installer -ArgumentList @('/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART',"/DIR=$install","/LOG=$installLog") -Wait -PassThru
+          if($setup.ExitCode -ne 0){Get-Content $installLog -Tail 200 -ErrorAction SilentlyContinue;throw "Silent install failed with exit code $($setup.ExitCode)"}
           $data=Join-Path $env:RUNNER_TEMP 'qimutang-win7-test-data'
           New-Item -ItemType Directory -Force -Path $data | Out-Null
           $log=Join-Path $data 'backend.log'
